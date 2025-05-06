@@ -35,6 +35,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
+	"github.com/ethereum/go-ethereum/consensus/clique/hardfork"
+	"github.com/ethereum/go-ethereum/consensus/clique/hardfork/lausanne"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -235,6 +237,9 @@ func New(
 	conf := *config
 	if conf.Clique.Epoch == 0 {
 		conf.Clique.Epoch = epochLength
+	}
+	if config.Clique.Span <= 0 {
+		panic("clique consensus requires a valid span, should be greater than 0")
 	}
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
@@ -735,17 +740,21 @@ func ParseAddressBytes(b []byte) ([]*common.Address, error) {
 // rewards given.
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
-
+	snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	if err != nil {
+		return err
+	}
+	if c.config.IsLausanne(header.Number) && header.Number.Cmp(c.config.LausanneBlock) == 0 {
+		err := c.applyLausanneHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
+		if err != nil {
+			return err
+		}
+	}
 	if c.config.IsChaophraya(header.Number) {
-
 		if c.config.ChaophrayaBlock.Cmp(header.Number) == 0 {
 			log.Info("⭐️ POS Started", "number", header.Number)
 		}
 
-		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
-		if err != nil {
-			panic(err)
-		}
 		number := header.Number.Uint64()
 		blockSigner, _ := ecrecover(header, c.signatures)
 		if isNoturnDifficulty(header.Difficulty) && blockSigner != snap.SystemContracts.OfficialNode {
@@ -814,11 +823,17 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
-	if c.config.IsChaophraya(header.Number) {
-		snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.config.IsLausanne(header.Number) && header.Number.Cmp(c.config.LausanneBlock) == 0 {
+		err := c.applyLausanneHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
 		if err != nil {
-			panic(err)
+			return nil, nil, err
 		}
+	}
+	if c.config.IsChaophraya(header.Number) {
 		cx := chainContext{Chain: chain, clique: c}
 		if txs == nil {
 			txs = make([]*types.Transaction, 0)
@@ -826,12 +841,14 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		if receipts == nil {
 			receipts = make([]*types.Receipt, 0)
 		}
+
 		if isSpanCommitmentBlock(c.config, header.Number) {
 			err := c.commitSpan(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
 			if err != nil {
 				return nil, nil, errInvalidSpan
 			}
 		}
+
 		// Begin slashing
 		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
@@ -840,19 +857,69 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			if err != nil {
 				return nil, nil, err
 			}
-
 		}
 		err = c.distributeIncoming(c.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
 		if err != nil {
 			return nil, nil, err
 		}
-
 	}
+
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble and return the final block for sealing
 	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), receipts, nil
+}
+
+func (c *Clique) applyLausanneHardfork(header *types.Header, state *state.StateDB, stakeManager common.Address, slashManager common.Address) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stakeManagerStorage, err := c.contractClient.GetStakeManagerStorage(ctx, header)
+	if err != nil {
+		return fmt.Errorf("failed to get stake manager storage: %v", err)
+	}
+	stakeManagerVault, err := c.contractClient.GetStakeManagerVault(ctx, header, stakeManager)
+	if err != nil {
+		return fmt.Errorf("failed to get stake manager vault: %v", err)
+	}
+	nftContract, err := c.contractClient.GetNftContract(ctx, header, stakeManager)
+	if err != nil {
+		return fmt.Errorf("failed to get nft contract: %v", err)
+	}
+	kkub, err := c.contractClient.GetKKUB(ctx, header, stakeManager)
+	if err != nil {
+		return fmt.Errorf("failed to get kkub: %v", err)
+	}
+	slashThreshold, err := c.contractClient.GetSlashThreshold(ctx, header, slashManager)
+	if err != nil {
+		return fmt.Errorf("failed to get slash threshold: %v", err)
+	}
+	slashEpochSize, err := c.contractClient.GetSlashEpochSize(ctx, header, slashManager)
+	if err != nil {
+		return fmt.Errorf("failed to get slash epoch size: %v", err)
+	}
+	soloSlashRate, err := c.contractClient.GetSoloSlashRate(ctx, header, stakeManagerStorage)
+	if err != nil {
+		return fmt.Errorf("failed to get solo slash rate: %v", err)
+	}
+	params := lausanne.LausanneParams{
+		StakeManagerV2:        stakeManager,
+		StakeManagerStorageV2: stakeManagerStorage,
+		StakeManagerVault:     stakeManagerVault,
+		SlashManagerV2:        slashManager,
+		NftContract:           nftContract,
+		KKub:                  kkub,
+		SlashThreshold:        slashThreshold,
+		SlashEpochSize:        slashEpochSize,
+		SoloSlashRate:         soloSlashRate,
+	}
+	instruction, err := lausanne.New(params)
+	if err != nil {
+		return fmt.Errorf("failed to create lausanne instruction: %v", err)
+	}
+	hardfork.ApplyHardfork(state, instruction)
+	log.Info("⭐️ Lausanne Started", "number", header.Number, "name", instruction.Name, "stakeManagerStorage", stakeManagerStorage, "stakeManager", stakeManager, "slashManager", slashManager, "nftContract", nftContract, "kkub", kkub, "slashThreshold", slashThreshold, "slashEpochSize", slashEpochSize, "soloSlashRate", soloSlashRate)
+	return nil
 }
 
 // slash spoiled validators
