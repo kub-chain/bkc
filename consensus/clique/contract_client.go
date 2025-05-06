@@ -47,4 +47,25 @@ type ContractClient interface {
 
 	// Call for eligible validators
 	GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*ctypes.Validator, error)
+
+	// Call for stake manager address
+	GetStakeManagerStorage(ctx context.Context, header *types.Header) (common.Address, error)
+
+	// Call for stake manager vault address
+	GetStakeManagerVault(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error)
+
+	// Call for nft contract address
+	GetNftContract(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error)
+
+	// Call for KKUB address
+	GetKKUB(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error)
+
+	// Call for slash threshold
+	GetSlashThreshold(ctx context.Context, header *types.Header, slashManager common.Address) (*big.Int, error)
+
+	// Call for slash epoch size
+	GetSlashEpochSize(ctx context.Context, header *types.Header, slashManager common.Address) (*big.Int, error)
+
+	// Call for solo slash rate
+	GetSoloSlashRate(ctx context.Context, header *types.Header, stakeManagerStorage common.Address) (*big.Int, error)
 }

@@ -28,14 +28,15 @@ import (
 )
 
 type ContractClient struct {
-	stakeManagerABI abi.ABI
-	slashManagerABI abi.ABI
-	validatorSetABI abi.ABI
-	config          *params.ChainConfig // Consensus engine configuration parameters
-	signer          types.Signer
-	val             common.Address
-	signTxFn        ctypes.SignerTxFn
-	ethAPI          EthAPI
+	stakeManagerABI        abi.ABI
+	slashManagerABI        abi.ABI
+	validatorSetABI        abi.ABI
+	stakeManagerStorageAbi abi.ABI
+	config                 *params.ChainConfig // Consensus engine configuration parameters
+	signer                 types.Signer
+	val                    common.Address
+	signTxFn               ctypes.SignerTxFn
+	ethAPI                 EthAPI
 }
 
 func New(config *params.ChainConfig, ethAPI *ethapi.PublicBlockChainAPI) (*ContractClient, error) {
@@ -51,13 +52,18 @@ func New(config *params.ChainConfig, ethAPI *ethapi.PublicBlockChainAPI) (*Contr
 	if err != nil {
 		return &ContractClient{}, err
 	}
+	storageABI, err := abi.JSON(strings.NewReader(stakeManagerStorageABI))
+	if err != nil {
+		return &ContractClient{}, err
+	}
 
 	return &ContractClient{
-		stakeManagerABI: sABI,
-		slashManagerABI: slABI,
-		validatorSetABI: vABI,
-		ethAPI:          ethAPI,
-		config:          config,
+		stakeManagerABI:        sABI,
+		slashManagerABI:        slABI,
+		validatorSetABI:        vABI,
+		stakeManagerStorageAbi: storageABI,
+		ethAPI:                 ethAPI,
+		config:                 config,
 	}, nil
 }
 
@@ -71,6 +77,119 @@ func (cc *ContractClient) SetSigner(signer types.Signer) {
 func (cc *ContractClient) Inject(val common.Address, signTxFn ctypes.SignerTxFn) {
 	cc.val = val
 	cc.signTxFn = signTxFn
+}
+
+func (cc *ContractClient) GetStakeManagerVault(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "stakeManagerVault"
+	// get packed data
+	data, err := cc.stakeManagerABI.Pack(method)
+	if err != nil {
+		log.Error("Failed to pack data for stakeManagerVault", "error", err)
+		return common.Address{}, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &stakeManager,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var ret0 common.Address
+	if err := cc.stakeManagerABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return common.Address{}, err
+	}
+	return ret0, nil
+}
+
+func (cc *ContractClient) GetNftContract(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "nftContract"
+	// get packed data
+	data, err := cc.stakeManagerABI.Pack(method)
+	if err != nil {
+		log.Error("Failed to pack data for nftContract", "error", err)
+		return common.Address{}, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &stakeManager,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var ret0 common.Address
+	if err := cc.stakeManagerABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return common.Address{}, err
+	}
+	return ret0, nil
+}
+
+func (cc *ContractClient) GetKKUB(ctx context.Context, header *types.Header, stakeManager common.Address) (common.Address, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "kkub"
+	// get packed data
+	data, err := cc.stakeManagerABI.Pack(method)
+	if err != nil {
+		log.Error("Failed to pack data for nftContract", "error", err)
+		return common.Address{}, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &stakeManager,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var ret0 common.Address
+	if err := cc.stakeManagerABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return common.Address{}, err
+	}
+	return ret0, nil
+}
+
+func (cc *ContractClient) GetStakeManagerStorage(ctx context.Context, header *types.Header) (common.Address, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "stakeManagerStorage"
+	// get packed data
+	data, err := cc.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return common.Address{}, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := cc.getValidatorContract(header.Number)
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	var ret0 common.Address
+	if err := cc.validatorSetABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return common.Address{}, err
+	}
+	return ret0, nil
 }
 
 func (cc *ContractClient) Slash(contract common.Address, spoiledVal common.Address, chain consensus.ChainHeaderReader, state *state.StateDB, header *types.Header, cx core.ChainContext,
@@ -433,3 +552,90 @@ func (m callmsg) GasPrice() *big.Int   { return m.CallMsg.GasPrice }
 func (m callmsg) Gas() uint64          { return m.CallMsg.Gas }
 func (m callmsg) Value() *big.Int      { return m.CallMsg.Value }
 func (m callmsg) Data() []byte         { return m.CallMsg.Data }
+
+func (cc *ContractClient) GetSlashThreshold(ctx context.Context, header *types.Header, slashManager common.Address) (*big.Int, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "threshold"
+	// get packed data
+	data, err := cc.slashManagerABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for GetSlashThreshold", "error", err)
+		return nil, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := slashManager
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var ret0 *big.Int
+	if err := cc.slashManagerABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return nil, err
+	}
+	return ret0, nil
+}
+
+func (cc *ContractClient) GetSlashEpochSize(ctx context.Context, header *types.Header, slashManager common.Address) (*big.Int, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "maxEpochSize"
+	// get packed data
+	data, err := cc.slashManagerABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for GetSlashEpochSize", "error", err)
+		return nil, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := slashManager
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var ret0 *big.Int
+	if err := cc.slashManagerABI.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return nil, err
+	}
+	return ret0, nil
+}
+
+func (cc *ContractClient) GetSoloSlashRate(ctx context.Context, header *types.Header, stakeManagerStorage common.Address) (*big.Int, error) {
+	blockNr := rpc.BlockNumberOrHashWithHash(header.ParentHash, false)
+	method := "soloSlashRate"
+	// get packed data
+	data, err := cc.stakeManagerStorageAbi.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for GetSlashEpochSize", "error", err)
+		return nil, err
+	}
+
+	msgData := (hexutil.Bytes)(data)
+	toAddress := stakeManagerStorage
+	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
+	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
+		Gas:  &gas,
+		To:   &toAddress,
+		Data: &msgData,
+	}, blockNr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var ret0 *big.Int
+	if err := cc.stakeManagerStorageAbi.UnpackIntoInterface(&ret0, method, result); err != nil {
+		return nil, err
+	}
+	return ret0, nil
+}
