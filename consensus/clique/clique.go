@@ -125,6 +125,10 @@ var (
 	// list of validators different than the one the local node calculated.
 	errMismatchingSpanValidators = errors.New("mismatching validator list on span block")
 
+	// errMismatchingConsensusExtraData is returned if a span block contains a
+	// list of validators and system addresses different than the one the local node calculated.
+	errMismatchingConsensusExtraData = errors.New("mismatching consensus extra data on span block")
+
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 
@@ -762,19 +766,24 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		if needToUpdateValidatorList(c.config, header.Number) {
-			newValidators, _, err := c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			newValidators, systemContracts, err := c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
 			if err != nil {
 				return err
 			}
 
-			validatorsBytes := make([]byte, len(newValidators)*validatorBytesLength)
-			for i, validator := range newValidators {
-				copy(validatorsBytes[i*validatorBytesLength:], validator.HeaderBytes())
+			localExtra := []byte{}
+			for _, validator := range newValidators {
+				localExtra = append(localExtra, validator.HeaderBytes()...)
 			}
 
-			extraSuffix := len(header.Extra) - extraSeal - contractBytesLength
-			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], validatorsBytes) {
-				return errMismatchingSpanValidators
+			localExtra = append(localExtra, systemContracts.StakeManager.Bytes()...)
+			localExtra = append(localExtra, systemContracts.SlashManager.Bytes()...)
+			localExtra = append(localExtra, systemContracts.OfficialNode.Bytes()...)
+
+			extraSuffix := len(header.Extra) - extraSeal
+
+			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], localExtra) {
+				return errMismatchingConsensusExtraData
 			}
 		}
 
