@@ -21,7 +21,7 @@ export PATH=$PATH:/usr/local/go/bin
 * Clone bkc repository
 
 ```shell
-git clone https://github.com/bitkub-blockchain/bkc.git && cd bkc
+git clone https://github.com/kub-chain/bkc.git && cd bkc
 ```
 * Build geth binary
 
