@@ -720,6 +720,43 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
 
 	header.Time = parent.Time + c.config.GetBlockPeriod(header.Number)
+
+	// If parent was sealed by Official Node (backup), add the 2s wait time
+	if c.config.IsChaophraya(parent.Number) {
+		// In Chaophraya, Coinbase is the signer.
+		// We check if the parent's Coinbase is the Official Node.
+		if parent.Coinbase == snap.SystemContracts.OfficialNode {
+			if isNoturnDifficulty(parent.Difficulty) {
+				// Check if the inturn validator was slashed BEFORE the parent block
+				// We need the snapshot used for the parent block (N-1)
+				parentNumber := parent.Number.Uint64()
+				parentSnap, err := c.snapshot(chain, parentNumber, parent.ParentHash, nil)
+				if err == nil {
+					inturnSigner := parentSnap.getInturnSigner(parentNumber)
+
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+
+					// Get span for PARENT block
+					currentSpan, err := c.contractClient.GetCurrentSpan(ctx, parent)
+					if err == nil {
+						if isSpanFirstBlock(c.config, parent.Number) {
+							currentSpan = new(big.Int).Add(currentSpan, common.Big1)
+						}
+
+						// Check if slashed at PARENT state
+						slashed, err := c.contractClient.IsSlashed(parentSnap.SystemContracts.SlashManager, chain, inturnSigner, currentSpan, parent)
+						if err == nil && !slashed {
+							if header.Time-parent.Time < c.config.Clique.Period+2 {
+								header.Time += 2
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
