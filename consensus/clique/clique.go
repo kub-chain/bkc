@@ -699,9 +699,9 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
 			}
-			for _, validator := range newValidators {
-				header.Extra = append(header.Extra, validator.HeaderBytes()...)
-			}
+				for _, validator := range newValidators {
+					header.Extra = append(header.Extra, validator.HeaderBytes()...)
+				}
 			// // Add StakeManager bytes to header.Extra
 			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
 			// // Add SlashManager bytes to header.Extra
@@ -727,29 +727,23 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		// We check if the parent's Coinbase is the Official Node.
 		if parent.Coinbase == snap.SystemContracts.OfficialNode {
 			if isNoturnDifficulty(parent.Difficulty) {
-				// Check if the inturn validator was slashed BEFORE the parent block
-				// We need the snapshot used for the parent block (N-1)
-				parentNumber := parent.Number.Uint64()
-				parentSnap, err := c.snapshot(chain, parentNumber, parent.ParentHash, nil)
+
+				inturnSigner := snap.getInturnSigner(number)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				// Get span for PARENT block
+				currentSpan, err := c.contractClient.GetCurrentSpan(ctx, parent)
 				if err == nil {
-					inturnSigner := parentSnap.getInturnSigner(parentNumber)
+					if isSpanFirstBlock(c.config, parent.Number) {
+						currentSpan = new(big.Int).Add(currentSpan, common.Big1)
+					}
 
-					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
-
-					// Get span for PARENT block
-					currentSpan, err := c.contractClient.GetCurrentSpan(ctx, parent)
-					if err == nil {
-						if isSpanFirstBlock(c.config, parent.Number) {
-							currentSpan = new(big.Int).Add(currentSpan, common.Big1)
-						}
-
-						// Check if slashed at PARENT state
-						slashed, err := c.contractClient.IsSlashed(parentSnap.SystemContracts.SlashManager, chain, inturnSigner, currentSpan, parent)
-						if err == nil && !slashed {
-							if header.Time-parent.Time < c.config.Clique.Period+2 {
-								header.Time += 2
-							}
+					// Check if slashed at PARENT state
+					slashed, err := c.contractClient.IsSlashed(snap.SystemContracts.SlashManager, chain, inturnSigner, currentSpan, parent)
+					if err == nil && !slashed {
+						if header.Time-parent.Time < c.config.Clique.Period+2 {
+							header.Time += 2
 						}
 					}
 				}
@@ -809,8 +803,8 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			}
 
 			localExtra := []byte{}
-			for _, validator := range newValidators {
-				localExtra = append(localExtra, validator.HeaderBytes()...)
+				for _, validator := range newValidators {
+					localExtra = append(localExtra, validator.HeaderBytes()...)
 			}
 
 			localExtra = append(localExtra, systemContracts.StakeManager.Bytes()...)
