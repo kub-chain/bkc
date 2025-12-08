@@ -323,8 +323,8 @@ type CheckpointOracleConfig struct {
 	Threshold uint64           `json:"threshold"`
 }
 
-// FastBlockConfig represents the configuration for the FastBlock hardfork
-type FastBlockConfig struct {
+// BaselConfig represents the configuration for the Basel hardfork
+type BaselConfig struct {
 	Block  *big.Int `json:"block,omitempty"`  // Block number where the fork activates
 	Period uint64   `json:"period,omitempty"` // New block period after the fork
 }
@@ -349,20 +349,20 @@ type ChainConfig struct {
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
 
-	ByzantiumBlock         *big.Int         `json:"byzantiumBlock,omitempty"`         // Byzantium switch block (nil = no fork, 0 = already on byzantium)
-	ConstantinopleBlock    *big.Int         `json:"constantinopleBlock,omitempty"`    // Constantinople switch block (nil = no fork, 0 = already activated)
-	PetersburgBlock        *big.Int         `json:"petersburgBlock,omitempty"`        // Petersburg switch block (nil = same as Constantinople)
-	IstanbulBlock          *big.Int         `json:"istanbulBlock,omitempty"`          // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	ErawanBlock            *big.Int         `json:"erawanBlock,omitempty"`            // IsErawan switch block (nil = no fork, 0 = already on Erawan)
-	ChaophrayaBlock        *big.Int         `json:"chaophrayaBlock,omitempty"`        // IsChaophraya switch block (nil = no fork, 0 = already on Chaophraya)
-	ChaophrayaBangkokBlock *big.Int         `json:"chaophrayaBangkokBlock,omitempty"` // IsChaophraya Testnet switch block (nil = no fork, 0 = already on Chaophraya Testnet)
-	LausanneBlock          *big.Int         `json:"lausanneBlock,omitempty"`          // IsLausanne switch block (nil = no fork, 0 = already on lausanne)
-	FastBlockBlock         *FastBlockConfig `json:"fastBlockBlock,omitempty"`         // IsFastBlock config - changes block period (nil = no fork)
-	MuirGlacierBlock       *big.Int         `json:"muirGlacierBlock,omitempty"`       // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	BerlinBlock            *big.Int         `json:"berlinBlock,omitempty"`            // Berlin switch block (nil = no fork, 0 = already on berlin)
-	LondonBlock            *big.Int         `json:"londonBlock,omitempty"`            // London switch block (nil = no fork, 0 = already on london)
-	ArrowGlacierBlock      *big.Int         `json:"arrowGlacierBlock,omitempty"`      // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	MergeForkBlock         *big.Int         `json:"mergeForkBlock,omitempty"`         // EIP-3675 (TheMerge) switch block (nil = no fork, 0 = already in merge proceedings)
+	ByzantiumBlock         *big.Int     `json:"byzantiumBlock,omitempty"`         // Byzantium switch block (nil = no fork, 0 = already on byzantium)
+	ConstantinopleBlock    *big.Int     `json:"constantinopleBlock,omitempty"`    // Constantinople switch block (nil = no fork, 0 = already activated)
+	PetersburgBlock        *big.Int     `json:"petersburgBlock,omitempty"`        // Petersburg switch block (nil = same as Constantinople)
+	IstanbulBlock          *big.Int     `json:"istanbulBlock,omitempty"`          // Istanbul switch block (nil = no fork, 0 = already on istanbul)
+	ErawanBlock            *big.Int     `json:"erawanBlock,omitempty"`            // IsErawan switch block (nil = no fork, 0 = already on Erawan)
+	ChaophrayaBlock        *big.Int     `json:"chaophrayaBlock,omitempty"`        // IsChaophraya switch block (nil = no fork, 0 = already on Chaophraya)
+	ChaophrayaBangkokBlock *big.Int     `json:"chaophrayaBangkokBlock,omitempty"` // IsChaophraya Testnet switch block (nil = no fork, 0 = already on Chaophraya Testnet)
+	LausanneBlock          *big.Int     `json:"lausanneBlock,omitempty"`          // IsLausanne switch block (nil = no fork, 0 = already on lausanne)
+	BaselBlock             *BaselConfig `json:"baselBlock,omitempty"`             // IsBasel config - changes block period (nil = no fork)
+	MuirGlacierBlock       *big.Int     `json:"muirGlacierBlock,omitempty"`       // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	BerlinBlock            *big.Int     `json:"berlinBlock,omitempty"`            // Berlin switch block (nil = no fork, 0 = already on berlin)
+	LondonBlock            *big.Int     `json:"londonBlock,omitempty"`            // London switch block (nil = no fork, 0 = already on london)
+	ArrowGlacierBlock      *big.Int     `json:"arrowGlacierBlock,omitempty"`      // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	MergeForkBlock         *big.Int     `json:"mergeForkBlock,omitempty"`         // EIP-3675 (TheMerge) switch block (nil = no fork, 0 = already in merge proceedings)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -511,20 +511,20 @@ func (c *ChainConfig) IsLausanne(num *big.Int) bool {
 	return isForked(c.LausanneBlock, num)
 }
 
-// IsFastBlock returns whether num is either equal to or greater than the FastBlock fork block
-func (c *ChainConfig) IsFastBlock(num *big.Int) bool {
-	if c.FastBlockBlock != nil && c.FastBlockBlock.Block != nil {
-		return isForked(c.FastBlockBlock.Block, num)
+// IsBasel returns whether num is either equal to or greater than the Basel fork block
+func (c *ChainConfig) IsBasel(num *big.Int) bool {
+	if c.BaselBlock != nil && c.BaselBlock.Block != nil {
+		return isForked(c.BaselBlock.Block, num)
 	}
 	return false
 }
 
 // GetBlockPeriod returns the correct block period based on the block number
-// Returns FastBlockBlock.Period if fork is active and configured, otherwise returns Period
+// Returns BaselBlock.Period if fork is active and configured, otherwise returns Period
 func (c *ChainConfig) GetBlockPeriod(num *big.Int) uint64 {
-	if c.Clique != nil && c.IsFastBlock(num) {
-		if c.FastBlockBlock != nil && c.FastBlockBlock.Period > 0 {
-			return c.FastBlockBlock.Period
+	if c.Clique != nil && c.IsBasel(num) {
+		if c.BaselBlock != nil && c.BaselBlock.Period > 0 {
+			return c.BaselBlock.Period
 		}
 	}
 	if c.Clique != nil {

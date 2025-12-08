@@ -699,9 +699,9 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
 			}
-				for _, validator := range newValidators {
-					header.Extra = append(header.Extra, validator.HeaderBytes()...)
-				}
+			for _, validator := range newValidators {
+				header.Extra = append(header.Extra, validator.HeaderBytes()...)
+			}
 			// // Add StakeManager bytes to header.Extra
 			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
 			// // Add SlashManager bytes to header.Extra
@@ -722,8 +722,8 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Time = parent.Time + c.config.GetBlockPeriod(header.Number)
 
 	// If parent was sealed by Official Node (backup), add the 2s wait time
-	if c.config.IsChaophraya(parent.Number) {
-		// In Chaophraya, Coinbase is the signer.
+	if c.config.IsBasel(parent.Number) {
+		// In Basel, Coinbase is the signer.
 		// We check if the parent's Coinbase is the Official Node.
 		if parent.Coinbase == snap.SystemContracts.OfficialNode {
 			if isNoturnDifficulty(parent.Difficulty) {
@@ -803,8 +803,8 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			}
 
 			localExtra := []byte{}
-				for _, validator := range newValidators {
-					localExtra = append(localExtra, validator.HeaderBytes()...)
+			for _, validator := range newValidators {
+				localExtra = append(localExtra, validator.HeaderBytes()...)
 			}
 
 			localExtra = append(localExtra, systemContracts.StakeManager.Bytes()...)
