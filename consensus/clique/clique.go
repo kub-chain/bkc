@@ -742,7 +742,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 					// Check if slashed at PARENT state
 					slashed, err := c.contractClient.IsSlashed(snap.SystemContracts.SlashManager, chain, inturnSigner, currentSpan, parent)
 					if err == nil && !slashed {
-						if header.Time-parent.Time < c.config.Clique.Period+2 {
+						if header.Time-parent.Time < c.config.BaselBlock.Period+2 {
 							header.Time += 2
 						}
 					}
