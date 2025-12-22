@@ -513,7 +513,10 @@ func (c *ChainConfig) IsLausanne(num *big.Int) bool {
 
 // IsBasel returns whether num is either equal to or greater than the Basel fork block
 func (c *ChainConfig) IsBasel(num *big.Int) bool {
-	return isForked(c.BaselBlock.Block, num)
+	if c.BaselBlock != nil && c.BaselBlock.Block != nil {
+		return isForked(c.BaselBlock.Block, num)
+	}
+	return false
 }
 
 // GetBlockPeriod returns the correct block period based on the block number
