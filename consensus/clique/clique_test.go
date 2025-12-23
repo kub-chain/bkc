@@ -981,3 +981,42 @@ func TestRandomValidator(t *testing.T) {
 	}
 
 }
+
+// TestGetBlockPeriodBaselHardfork tests that GetBlockPeriod returns the correct period
+// before and after the Basel hardfork activation
+func TestGetBlockPeriodBaselHardfork(t *testing.T) {
+	var (
+		baselActivationBlock = 10
+	)
+
+	// Create a test configuration
+	genspec := test.NewDefaultGenesis()
+
+	// Set default Clique period to 5 seconds (before Basel)
+	genspec.Config.Clique.Period = 5
+
+	// Configure Basel hardfork activation
+	genspec.Config.BaselBlock = &params.BaselConfig{
+		Block:  big.NewInt(int64(baselActivationBlock)),
+		Period: 3, // New block period in seconds (3 seconds instead of 5)
+	}
+
+	// Test 1: Pre-Basel blocks should return period of 5 seconds
+	preBaselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(1))
+	if preBaselPeriod != 5 {
+		t.Fatalf("Pre-Basel GetBlockPeriod should return 5, got %d", preBaselPeriod)
+	}
+
+	// Test 2: Basel activation block should return period of 3 seconds
+	baselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(int64(baselActivationBlock)))
+	if baselPeriod != 3 {
+		t.Fatalf("Basel GetBlockPeriod (block %d) should return 3, got %d", baselActivationBlock, baselPeriod)
+	}
+
+	// Test 3: Post-Basel blocks should return period of 3 seconds
+	postBaselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(int64(baselActivationBlock + 1)))
+	if postBaselPeriod != 3 {
+		t.Fatalf("Post-Basel GetBlockPeriod (block %d) should return 3, got %d", baselActivationBlock+1, postBaselPeriod)
+	}
+
+}
