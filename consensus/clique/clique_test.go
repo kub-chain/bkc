@@ -1021,7 +1021,7 @@ func TestGetBlockPeriodBaselHardfork(t *testing.T) {
 
 }
 
-func TestLausanneHardfork_Values(t *testing.T) {
+func TestChangeSlashThresholdAndEpochSize(t *testing.T) {
 	var (
 		accountRegistry = test.NewAccountRegistry()
 		lausanneBlock   = uint64(60)
