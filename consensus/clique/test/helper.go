@@ -186,13 +186,14 @@ func (tc *TestChain) mineBlock(t *testing.T) error {
 		nil,
 		nil,
 	)
-	// ignore txs root hash verification
-	header.TxHash = block.TxHash()
-	header.ReceiptHash = block.ReceiptHash()
 
 	if err != nil {
 		return err
 	}
+
+	// ignore txs root hash verification
+	header.TxHash = block.TxHash()
+	header.ReceiptHash = block.ReceiptHash()
 
 	// get seal hash
 	sealHash := tc.Chain.Engine().SealHash(header)
