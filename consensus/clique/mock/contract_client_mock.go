@@ -100,6 +100,22 @@ func (mr *MockContractClientMockRecorder) GetCurrentValidators(headerHash, block
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentValidators", reflect.TypeOf((*MockContractClient)(nil).GetCurrentValidators), headerHash, blockNumber)
 }
 
+// GetCurrentValidatorsWithSuperNode mocks base method.
+func (m *MockContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContractsV2, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCurrentValidatorsWithSuperNode", headerHash, blockNumber)
+	ret0, _ := ret[0].([]*ctypes.Validator)
+	ret1, _ := ret[1].(*ctypes.SystemContractsV2)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetCurrentValidatorsWithSuperNode indicates an expected call of GetCurrentValidatorsWithSuperNode.
+func (mr *MockContractClientMockRecorder) GetCurrentValidatorsWithSuperNode(headerHash, blockNumber interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentValidatorsWithSuperNode", reflect.TypeOf((*MockContractClient)(nil).GetCurrentValidatorsWithSuperNode), headerHash, blockNumber)
+}
+
 // GetEligibleValidators mocks base method.
 func (m *MockContractClient) GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*ctypes.Validator, error) {
 	m.ctrl.T.Helper()
@@ -220,6 +236,21 @@ func (mr *MockContractClientMockRecorder) GetStakeManagerVault(ctx, header, stak
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStakeManagerVault", reflect.TypeOf((*MockContractClient)(nil).GetStakeManagerVault), ctx, header, stakeManager)
 }
 
+// GetValidatorInfoValidatorShareContractByIndex mocks base method.
+func (m *MockContractClient) GetValidatorInfoValidatorShareContractByIndex(ctx context.Context, header *types.Header, stakeManagerStorage common.Address, index *big.Int) (common.Address, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetValidatorInfoValidatorShareContractByIndex", ctx, header, stakeManagerStorage, index)
+	ret0, _ := ret[0].(common.Address)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetValidatorInfoValidatorShareContractByIndex indicates an expected call of GetValidatorInfoValidatorShareContractByIndex.
+func (mr *MockContractClientMockRecorder) GetValidatorInfoValidatorShareContractByIndex(ctx, header, stakeManagerStorage, index interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetValidatorInfoValidatorShareContractByIndex", reflect.TypeOf((*MockContractClient)(nil).GetValidatorInfoValidatorShareContractByIndex), ctx, header, stakeManagerStorage, index)
+}
+
 // Inject mocks base method.
 func (m *MockContractClient) Inject(val common.Address, signTxFn ctypes.SignerTxFn) {
 	m.ctrl.T.Helper()
@@ -245,6 +276,18 @@ func (m *MockContractClient) IsSlashed(contract common.Address, chain consensus.
 func (mr *MockContractClientMockRecorder) IsSlashed(contract, chain, signer, span, header interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsSlashed", reflect.TypeOf((*MockContractClient)(nil).IsSlashed), contract, chain, signer, span, header)
+}
+
+// SetBKCValidatorAddress mocks base method.
+func (m *MockContractClient) SetBKCValidatorAddress(address common.Address) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBKCValidatorAddress", address)
+}
+
+// SetBKCValidatorAddress indicates an expected call of SetBKCValidatorAddress.
+func (mr *MockContractClientMockRecorder) SetBKCValidatorAddress(address interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBKCValidatorAddress", reflect.TypeOf((*MockContractClient)(nil).SetBKCValidatorAddress), address)
 }
 
 // SetSigner mocks base method.

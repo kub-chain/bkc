@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique/ctypes"
 	"github.com/ethereum/go-ethereum/consensus/clique/hardfork"
+	"github.com/ethereum/go-ethereum/consensus/clique/hardfork/basel"
 	"github.com/ethereum/go-ethereum/consensus/clique/hardfork/lausanne"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
@@ -371,6 +372,10 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		}
 	}
 
+	if header.Number.Cmp(new(big.Int).Add(common.Big1, c.config.BaselBlock.Block)) == 0 {
+		checkpoint = true
+	}
+
 	if !checkpoint && signersBytes != 0 {
 		return errExtraSigners
 	}
@@ -612,7 +617,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if err != nil {
 		return err
 	}
-	if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+	if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SuperNode {
 		return errUnauthorizedSigner
 	}
 
@@ -633,6 +638,7 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
+	c.contractClient.SetBKCValidatorAddress(c.getValidatorContract(header))
 	number := header.Number.Uint64()
 	if !chain.Config().IsErawan(header.Number) {
 		header.Coinbase = common.Address{}
@@ -694,7 +700,15 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	if number > 0 && isNextBlockPoS(c.config, header.Number) {
 		if needToUpdateValidatorList(c.config, header.Number) {
-			newValidators, systemContracts, err := c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			var newValidators []*ctypes.Validator
+			var systemContracts *ctypes.SystemContracts
+			var systemContractsV2 *ctypes.SystemContractsV2
+
+			if c.config.IsBasel(header.Number) {
+				newValidators, systemContractsV2, err = c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number+1))
+			} else {
+				newValidators, systemContracts, err = c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			}
 			if err != nil {
 				log.Error("GetCurrentValidators", "err", err.Error())
 				return errors.New("unknown validators")
@@ -702,12 +716,22 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 			for _, validator := range newValidators {
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
-			// // Add StakeManager bytes to header.Extra
-			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
-			// // Add SlashManager bytes to header.Extra
-			header.Extra = append(header.Extra, systemContracts.SlashManager.Bytes()...)
-			// // Add OfficialNode bytes to header.Extra
-			header.Extra = append(header.Extra, systemContracts.OfficialNode.Bytes()...)
+
+			if c.config.IsBasel(header.Number) {
+				// // Add StakeManager bytes to header.Extra
+				header.Extra = append(header.Extra, systemContractsV2.StakeManager.Bytes()...)
+				// // Add SlashManager bytes to header.Extra
+				header.Extra = append(header.Extra, systemContractsV2.SlashManager.Bytes()...)
+				// // Add SuperNode bytes to header.Extra
+				header.Extra = append(header.Extra, systemContractsV2.SuperNode.Bytes()...)
+			} else {
+				// // Add StakeManager bytes to header.Extra
+				header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
+				// // Add SlashManager bytes to header.Extra
+				header.Extra = append(header.Extra, systemContracts.SlashManager.Bytes()...)
+				// // Add OfficialNode bytes to header.Extra
+				header.Extra = append(header.Extra, systemContracts.OfficialNode.Bytes()...)
+			}
 		}
 	}
 
@@ -717,15 +741,25 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return consensus.ErrUnknownAncestor
 	}
 
+	if header.Number.Cmp(new(big.Int).Add(c.config.BaselBlock.Block, common.Big1)) == 0 {
+		var systemContractsV2 *ctypes.SystemContractsV2
+		_, systemContractsV2, err = c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number+1))
+
+		header.Extra = append(header.Extra, systemContractsV2.StakeManager.Bytes()...)
+		// // Add SlashManager bytes to header.Extra
+		header.Extra = append(header.Extra, systemContractsV2.SlashManager.Bytes()...)
+		// // Add SuperNode bytes to header.Extra
+		header.Extra = append(header.Extra, systemContractsV2.SuperNode.Bytes()...)
+	}
+
 	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
 
 	header.Time = parent.Time + c.config.GetBlockPeriod(header.Number)
 
 	// If parent was sealed by Official Node (backup), add the 2s wait time
 	if c.config.IsBasel(parent.Number) {
-		// In Basel, Coinbase is the signer.
 		// We check if the parent's Coinbase is the Official Node.
-		if parent.Coinbase == snap.SystemContracts.OfficialNode {
+		if parent.Coinbase == snap.SystemContracts.OfficialNode || parent.Coinbase == snap.SuperNode {
 			if isNoturnDifficulty(parent.Difficulty) {
 
 				inturnSigner := snap.getInturnSigner(number)
@@ -775,12 +809,19 @@ func ParseAddressBytes(b []byte) ([]*common.Address, error) {
 // rewards given.
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
+	c.contractClient.SetBKCValidatorAddress(c.getValidatorContract(header))
 	snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
 	if c.config.IsLausanne(header.Number) && header.Number.Cmp(c.config.LausanneBlock) == 0 {
 		err := c.applyLausanneHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
+		if err != nil {
+			return err
+		}
+	}
+	if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
+		err = c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
 		if err != nil {
 			return err
 		}
@@ -792,12 +833,19 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 		number := header.Number.Uint64()
 		blockSigner, _ := ecrecover(header, c.signatures)
-		if isNoturnDifficulty(header.Difficulty) && blockSigner != snap.SystemContracts.OfficialNode {
+		if isNoturnDifficulty(header.Difficulty) && blockSigner != snap.SystemContracts.OfficialNode && blockSigner != snap.SuperNode {
 			return errInvalidDifficulty
 		}
 
 		if needToUpdateValidatorList(c.config, header.Number) {
-			newValidators, systemContracts, err := c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			var newValidators []*ctypes.Validator
+			var systemContracts *ctypes.SystemContracts
+			var systemContractsV2 *ctypes.SystemContractsV2
+			if c.config.IsBasel(header.Number) {
+				newValidators, systemContractsV2, err = c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number+1))
+			} else {
+				newValidators, systemContracts, err = c.contractClient.GetCurrentValidators(header.ParentHash, new(big.Int).SetUint64(number+1))
+			}
 			if err != nil {
 				return err
 			}
@@ -807,15 +855,38 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 				localExtra = append(localExtra, validator.HeaderBytes()...)
 			}
 
-			localExtra = append(localExtra, systemContracts.StakeManager.Bytes()...)
-			localExtra = append(localExtra, systemContracts.SlashManager.Bytes()...)
-			localExtra = append(localExtra, systemContracts.OfficialNode.Bytes()...)
+			if c.config.IsBasel(header.Number) {
+				// Add StakeManager bytes to header.Extra
+				localExtra = append(localExtra, systemContractsV2.StakeManager.Bytes()...)
+				// Add SlashManager bytes to header.Extra
+				localExtra = append(localExtra, systemContractsV2.SlashManager.Bytes()...)
+				// Add SuperNode bytes to header.Extra
+				localExtra = append(localExtra, systemContractsV2.SuperNode.Bytes()...)
+			} else {
+				// Add StakeManager bytes to header.Extra
+				localExtra = append(localExtra, systemContracts.StakeManager.Bytes()...)
+				// Add SlashManager bytes to header.Extra
+				localExtra = append(localExtra, systemContracts.SlashManager.Bytes()...)
+				// Add OfficialNode bytes to header.Extra
+				localExtra = append(localExtra, systemContracts.OfficialNode.Bytes()...)
+			}
 
 			extraSuffix := len(header.Extra) - extraSeal
 
 			if !bytes.Equal(header.Extra[extraVanity:extraSuffix], localExtra) {
 				return errMismatchingConsensusExtraData
 			}
+		}
+
+		if header.Number.Cmp(new(big.Int).Add(common.Big1, c.config.BaselBlock.Block)) == 0 {
+			var systemContractsV2 *ctypes.SystemContractsV2
+			_, systemContractsV2, err = c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number+1))
+
+			header.Extra = append(header.Extra, systemContractsV2.StakeManager.Bytes()...)
+			// // Add SlashManager bytes to header.Extra
+			header.Extra = append(header.Extra, systemContractsV2.SlashManager.Bytes()...)
+			// // Add SuperNode bytes to header.Extra
+			header.Extra = append(header.Extra, systemContractsV2.SuperNode.Bytes()...)
 		}
 
 		cx := chainContext{Chain: chain, clique: c}
@@ -828,12 +899,12 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 
 		// noturn is only permitted from official node
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase != snap.SystemContracts.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && (header.Coinbase != snap.SystemContracts.OfficialNode && header.Coinbase != snap.SuperNode) {
 			return errUnauthorizedSigner
 		}
 
 		// Begin slashing state update
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && (header.Coinbase == snap.SystemContracts.OfficialNode || header.Coinbase == snap.SuperNode) {
 			log.Debug("ℹ️  Commited by official node", "validator", header.Coinbase, "diff", header.Difficulty, "number", header.Number)
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Debug("🗡️  Slashing validator", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
@@ -873,6 +944,12 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			return nil, nil, err
 		}
 	}
+	if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
+		err = c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	if c.config.IsChaophraya(header.Number) {
 		cx := chainContext{Chain: chain, clique: c}
 		if txs == nil {
@@ -890,7 +967,7 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 
 		// Begin slashing
-		if !isInturnDifficulty(header.Difficulty) && header.Coinbase == snap.SystemContracts.OfficialNode {
+		if !isInturnDifficulty(header.Difficulty) && (header.Coinbase == snap.SystemContracts.OfficialNode || header.Coinbase == snap.SuperNode) {
 			inturnSigner := snap.getInturnSigner(header.Number.Uint64())
 			log.Debug("🗡️  Slashing validator (FAA)", "signer", inturnSigner, "diff", header.Difficulty, "number", header.Number)
 			err = c.slash(inturnSigner, chain, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
@@ -942,6 +1019,7 @@ func (c *Clique) applyLausanneHardfork(header *types.Header, state *state.StateD
 	if err != nil {
 		return fmt.Errorf("failed to get solo slash rate: %v", err)
 	}
+
 	params := lausanne.LausanneParams{
 		StakeManagerV2:        stakeManager,
 		StakeManagerStorageV2: stakeManagerStorage,
@@ -953,12 +1031,56 @@ func (c *Clique) applyLausanneHardfork(header *types.Header, state *state.StateD
 		SlashEpochSize:        slashEpochSize,
 		SoloSlashRate:         soloSlashRate,
 	}
+
 	instruction, err := lausanne.New(params)
 	if err != nil {
 		return fmt.Errorf("failed to create lausanne instruction: %v", err)
 	}
 	hardfork.ApplyHardfork(state, instruction)
 	log.Info("⭐️ Lausanne Started", "number", header.Number, "name", instruction.Name, "stakeManagerStorage", stakeManagerStorage, "stakeManager", stakeManager, "slashManager", slashManager, "nftContract", nftContract, "kkub", kkub, "slashThreshold", slashThreshold, "slashEpochSize", slashEpochSize, "soloSlashRate", soloSlashRate)
+	return nil
+}
+
+func (c *Clique) applyBaselHardfork(header *types.Header, state *state.StateDB, stakeManager common.Address, slashManager common.Address) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stakeManagerStorage, err := c.contractClient.GetStakeManagerStorage(ctx, header)
+	if err != nil {
+		return fmt.Errorf("failed to get stake manager storage: %v", err)
+	}
+	stakeManagerVault, err := c.contractClient.GetStakeManagerVault(ctx, header, stakeManager)
+	if err != nil {
+		return fmt.Errorf("failed to get stake manager vault: %v", err)
+	}
+	nftContract, err := c.contractClient.GetNftContract(ctx, header, stakeManager)
+	if err != nil {
+		return fmt.Errorf("failed to get nft contract: %v", err)
+	}
+	bkcValidatorSet := c.getValidatorContract(header)
+
+	officialNodeValidatorShare, err := c.contractClient.GetValidatorInfoValidatorShareContractByIndex(ctx, header, stakeManagerStorage, big.NewInt(0))
+	if err != nil {
+		return fmt.Errorf("failed to get official node validator share: %v", err)
+	}
+	params := basel.BaselParams{
+		StakeManagerV3:             stakeManager,
+		StakeManagerStorageV3:      stakeManagerStorage,
+		StakeManagerVaultV3:        stakeManagerVault,
+		SlashManagerV3:             slashManager,
+		NftContractV3:              nftContract,
+		BKCValidatorSetV3:          bkcValidatorSet,
+		OfficialNodeValidatorShare: officialNodeValidatorShare,
+		SuperNodeAddress:           c.config.BaselBlock.SuperNode,
+		SuperNodeOwnerAddress:      c.config.BaselBlock.SuperNodeOwner,
+		BaselBlock:                 c.config.BaselBlock.Block,
+	}
+
+	instruction, err := basel.New(state, params)
+	if err != nil {
+		return fmt.Errorf("failed to create basel instruction: %v", err)
+	}
+	hardfork.ApplyHardfork(state, instruction)
+	log.Info("⭐️ Basel Started", "number", header.Number, "name", instruction.Name)
 	return nil
 }
 
@@ -1068,7 +1190,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 	}
 	if c.config.IsChaophraya(header.Number) {
-		if _, authorized := snap.Signers[val]; !authorized && val != snap.SystemContracts.OfficialNode {
+		if _, authorized := snap.Signers[val]; !authorized && val != snap.SystemContracts.OfficialNode && val != snap.SuperNode {
 			return errUnauthorizedSigner
 		}
 	}
@@ -1145,7 +1267,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 			case <-stop:
 				return
 			case <-time.After(defaultWaitTime * time.Second):
-				if val != snap.SystemContracts.OfficialNode {
+				if val != snap.SystemContracts.OfficialNode && val != snap.SuperNode {
 					<-stop
 					return
 				}
@@ -1211,7 +1333,7 @@ func (c *Clique) IsInturn(chain consensus.ChainHeaderReader, header *types.Heade
 	}
 
 	if c.config.IsChaophraya(big.NewInt(int64(number))) {
-		if c.val != snap.getInturnSigner(number) && c.val != snap.SystemContracts.OfficialNode {
+		if c.val != snap.getInturnSigner(number) && c.val != snap.SystemContracts.OfficialNode && c.val != snap.SuperNode {
 			return false
 		}
 		return true
@@ -1360,6 +1482,14 @@ func (c *Clique) getVoteAddr(header *types.Header) common.Address {
 	} else {
 		return header.Coinbase
 	}
+}
+
+func (c *Clique) getValidatorContract(header *types.Header) common.Address {
+	validatorContract := c.config.Clique.ValidatorContract
+	if c.config.ChaophrayaBangkokBlock != nil && c.config.IsChaophrayaBangkok(header.Number) {
+		validatorContract = c.config.Clique.ValidatorContractV2
+	}
+	return validatorContract
 }
 
 // chain context

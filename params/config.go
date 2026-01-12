@@ -325,8 +325,10 @@ type CheckpointOracleConfig struct {
 
 // BaselConfig represents the configuration for the Basel hardfork
 type BaselConfig struct {
-	Block  *big.Int `json:"block,omitempty"`  // Block number where the fork activates
-	Period uint64   `json:"period,omitempty"` // New block period after the fork
+	Block          *big.Int       `json:"block,omitempty"`          // Block number where the fork activates
+	Period         uint64         `json:"period,omitempty"`         // New block period after the fork
+	SuperNode      common.Address `json:"superNode,omitempty"`      // SuperNode address
+	SuperNodeOwner common.Address `json:"superNodeOwner,omitempty"` // SuperNode owner address
 }
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -406,7 +408,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Erawan: %v, Chaophraya: %v, Lausanne: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, MergeFork: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Erawan: %v, Chaophraya: %v, Lausanne: %v, Basel: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, MergeFork: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -421,6 +423,7 @@ func (c *ChainConfig) String() string {
 		c.ErawanBlock,
 		c.ChaophrayaBlock,
 		c.LausanneBlock,
+		c.BaselBlock,
 		c.MuirGlacierBlock,
 		c.BerlinBlock,
 		c.LondonBlock,

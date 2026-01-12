@@ -64,6 +64,7 @@ type Snapshot struct {
 	Votes           []*Vote                     `json:"votes"`           // List of votes cast in chronological order
 	Tally           map[common.Address]Tally    `json:"tally"`           // Current vote tally to avoid recalculating
 	SystemContracts ctypes.SystemContracts      `json:"systemContracts"` // System contract addresses
+	SuperNode       common.Address              `json:"superNode"`       // Super node address
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -129,6 +130,7 @@ func (s *Snapshot) copy() *Snapshot {
 		Hash:            s.Hash,
 		Signers:         make(map[common.Address]struct{}),
 		Validators:      s.Validators,
+		SuperNode:       s.SuperNode,
 		SystemContracts: s.SystemContracts,
 		Recents:         make(map[uint64]common.Address),
 		Votes:           make([]*Vote, len(s.Votes)),
@@ -233,7 +235,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SuperNode {
 			return nil, errUnauthorizedSigner
 		}
 		if !s.config.IsChaophraya(header.Number) {
@@ -248,7 +250,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		}
 
 		if s.config.IsChaophraya(header.Number) {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SuperNode {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -366,7 +368,30 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				snap.SystemContracts.StakeManager = *contracts[0]
 				snap.SystemContracts.SlashManager = *contracts[1]
 				snap.SystemContracts.OfficialNode = *contracts[2]
+
+				if s.config.IsBasel(header.Number) {
+					snap.SystemContracts.OfficialNode = common.Address{}
+					snap.SuperNode = *contracts[2]
+				}
 			}
+		}
+
+		log.Info("Header processed for snapshot", "number", header.Number, "signer", signer, "authorize", authorize, "extra", header.Extra)
+		if header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
+			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if len(posBytes) < contractBytesLength {
+				log.Error("posBytes error", "bytes", posBytes)
+				// panic("invalid consensus bytes")
+			}
+			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+			contracts, err := ParseAddressBytes(addressBytes)
+			if err != nil {
+				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
+				// panic(err)
+			}
+			log.Info("posBytes error", "posBytes", addressBytes)
+			snap.SystemContracts.OfficialNode = common.Address{}
+			snap.SuperNode = *contracts[2]
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
