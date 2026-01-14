@@ -459,8 +459,6 @@ func (cc *ContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Ha
 		return nil, nil, err
 	}
 
-	log.Info("GetCurrentValidatorsWithSuperNode", "stakeManagerStorageAddr", stakeManagerStorageAddr.Hex())
-
 	method = "superNode"
 
 	data, err = cc.stakeManagerStorageABI.Pack(method)
@@ -484,8 +482,6 @@ func (cc *ContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Ha
 	if err := cc.stakeManagerStorageABI.UnpackIntoInterface(&superNode, method, result); err != nil {
 		return nil, nil, err
 	}
-
-	log.Info("GetCurrentValidatorsWithSuperNode", "superNode", superNode.Hex())
 
 	ca := &ctypes.SystemContractsV2{
 		StakeManager: (*ret2)[0],
