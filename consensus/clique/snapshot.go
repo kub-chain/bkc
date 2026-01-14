@@ -376,7 +376,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 		}
 
-		log.Info("Header processed for snapshot", "number", header.Number, "signer", signer, "authorize", authorize, "extra", header.Extra)
 		if header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
 			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 			if len(posBytes) < contractBytesLength {
@@ -389,7 +388,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
 				// panic(err)
 			}
-			log.Info("posBytes error", "posBytes", addressBytes)
 			snap.SystemContracts.OfficialNode = common.Address{}
 			snap.SuperNode = *contracts[2]
 		}

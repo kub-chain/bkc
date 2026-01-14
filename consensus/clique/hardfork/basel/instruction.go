@@ -25,12 +25,13 @@ type BaselParams struct {
 
 // StakeManager storage slots
 const (
+	SLOT_POOL_AMOUNT              = 9  // pool amount
+	SLOT_OFFICIAL_AMOUNT          = 11 // official amount
 	SLOT_VALIDATOR_ADDRESS_TO_IDS = 20 // mapping(address => uint256[])
 	SLOT_VALIDATOR_LIST           = 21 // Validator[] array
 	SLOT_MINIMAL_LIST             = 22 // EnumerableSet array
 	SLOT_SUPER_NODE_OLD           = 30 // Old super node address
 	SLOT_SUPER_NODE_NEW           = 31 // New super node address
-	SLOT_POOL_AMOUNT              = 9  // pool amount
 )
 
 // NFT Contract storage slots
@@ -83,17 +84,7 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 	poolAmount := state.GetState(params.StakeManagerStorageV3, common.BigToHash(big.NewInt(SLOT_POOL_AMOUNT))).Big().Uint64()
 	newPoolAmount := poolAmount + 1 // Convert official node (validator 0) to pool
 
-	// Get validator 0 slot to update its validatorShareContract
-	validator0SlotInt := new(big.Int).SetBytes(getValidatorSlot(SLOT_VALIDATOR_LIST, 0).Bytes())
-	// Read current validator 0 slot 5 to preserve status and commission rates
-	validator0Slot5 := state.GetState(params.StakeManagerStorageV3, common.BigToHash(new(big.Int).Add(validator0SlotInt, big.NewInt(5))))
-	// Extract current status and rates (packed with address in slot 5)
-	validator0Slot5Int := validator0Slot5.Big()
-	validator0Status := uint8(new(big.Int).Rsh(validator0Slot5Int, 160).Uint64() & 0xFF)
-	validator0InfraRate := uint16(new(big.Int).Rsh(validator0Slot5Int, 168).Uint64() & 0xFFFF)
-	validator0CommissionRate := uint16(new(big.Int).Rsh(validator0Slot5Int, 184).Uint64() & 0xFFFF)
-
-	nextValidatorSoltInt := new(big.Int).SetBytes(getValidatorSlot(SLOT_VALIDATOR_LIST, nextValidatorId).Bytes()) // For validator ID 1
+	nextValidatorSoltInt := new(big.Int).SetBytes(getValidatorSlot(SLOT_VALIDATOR_LIST, nextValidatorId).Bytes())
 
 	validatorIdsArrayLengthSlot := getMappingSlot(common.BytesToHash(params.SuperNodeAddress.Bytes()), SLOT_VALIDATOR_ADDRESS_TO_IDS)
 
@@ -143,11 +134,10 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 		common.BigToHash(new(big.Int).Add(minimalValidatorListDataSlotInt, big.NewInt(int64(currentMinimalListLength)))): common.BytesToHash(params.SuperNodeAddress.Bytes()),
 		common.BigToHash(minimalValidatorListDataIndexes.Big()):                                                          common.BigToHash(big.NewInt(int64(currentMinimalListLength + 1))),
 
+		common.BigToHash(big.NewInt(SLOT_OFFICIAL_AMOUNT)): common.BigToHash(common.Big0),
+
 		// Pool amount
 		common.BigToHash(big.NewInt(SLOT_POOL_AMOUNT)): common.BigToHash(big.NewInt(int64(newPoolAmount))),
-
-		// Convert validator 0 to pool
-		common.BigToHash(new(big.Int).Add(validator0SlotInt, big.NewInt(5))): packValidatorShareAndRates(params.OfficialNodeValidatorShare, validator0Status, validator0InfraRate, validator0CommissionRate),
 	}
 
 	tokenOwnerSlotLength := common.BigToHash(big.NewInt(SLOT_TOKEN_OWNERS))
