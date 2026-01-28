@@ -30,8 +30,10 @@ const (
 	SLOT_VALIDATOR_ADDRESS_TO_IDS = 20 // mapping(address => uint256[])
 	SLOT_VALIDATOR_LIST           = 21 // Validator[] array
 	SLOT_MINIMAL_LIST             = 22 // EnumerableSet array
-	SLOT_SUPER_NODE_OLD           = 30 // Old super node address
-	SLOT_SUPER_NODE_NEW           = 31 // New super node address
+	SLOT_OFFICIAL_SIGNER_OLD      = 18 // Old official signer address
+	SLOT_OFFICIAL_SIGNER_NEW      = 19 // New official signer address
+	SLOT_SUPER_NODE_OLD           = 30 // Old super node signer address
+	SLOT_SUPER_NODE_NEW           = 31 // New super node signer address
 )
 
 // NFT Contract storage slots
@@ -106,6 +108,10 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 	shiftedBlockNumber := new(big.Int).Lsh(params.BaselBlock, 160)             // blockNumber_ << 160
 	superNodeAndValidBlock := new(big.Int).Add(tmpUint256, shiftedBlockNumber) // tmpUint256 += blockNumber_ << 160
 
+	// Update new offical node siginer to address 0, shift current to old
+	currentOfficialNodeSigner := state.GetState(params.StakeManagerStorageV3, common.BigToHash(big.NewInt(SLOT_OFFICIAL_SIGNER_NEW))).Big()
+	newOfficialNodeSigner := new(big.Int).Add(new(big.Int).SetBytes(common.Address{}.Bytes()), shiftedBlockNumber)
+
 	instruction.Storage[params.StakeManagerStorageV3] = map[common.Hash]common.Hash{
 		// StakeManager reference
 		common.BigToHash(big.NewInt(1)): common.BytesToHash(params.StakeManagerV3.Bytes()),
@@ -113,6 +119,9 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 		// Super node configuration
 		common.BigToHash(big.NewInt(SLOT_SUPER_NODE_OLD)): common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		common.BigToHash(big.NewInt(SLOT_SUPER_NODE_NEW)): common.BigToHash(superNodeAndValidBlock),
+
+		common.BigToHash(big.NewInt(SLOT_OFFICIAL_SIGNER_NEW)): common.BigToHash(newOfficialNodeSigner),
+		common.BigToHash(big.NewInt(SLOT_OFFICIAL_SIGNER_OLD)): common.BigToHash(currentOfficialNodeSigner),
 
 		// New validator struct (6 slots)
 		common.BigToHash(new(big.Int).Add(nextValidatorSoltInt, big.NewInt(0))): common.BigToHash(big.NewInt(0)),
