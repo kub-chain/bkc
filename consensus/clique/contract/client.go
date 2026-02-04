@@ -512,7 +512,6 @@ func (cc *ContractClient) GetEligibleValidators(headerHash common.Hash, blockNum
 	// call
 	msgData := (hexutil.Bytes)(data)
 	toAddress := cc.bkcValidatorSet
-	log.Info("bkc validator contract", "xxxx", toAddress.Hex())
 	gas := (hexutil.Uint64)(uint64(math.MaxUint64 / 2))
 	result, err := cc.ethAPI.Call(ctx, ethapi.TransactionArgs{
 		Gas:  &gas,
