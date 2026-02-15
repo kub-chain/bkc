@@ -52,7 +52,7 @@ type ContractClient interface {
 	// GetSystemContracts(headerHash common.Hash, blockNumber *big.Int) (*ctypes.SystemContracts, error)
 
 	// Call for  current commited validators with super node
-	GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContractsV2, error)
+	GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContracts, error)
 
 	// Call for eligible validators
 	GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*ctypes.Validator, error)

@@ -10,6 +10,74 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// ┌────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+// │                             BASEL HARDFORK STORAGE CHANGES SUMMARY                                         │
+// ├────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+// │                                                                                                            │
+// │  CONTRACT: StakeManagerStorageV3                                                                           │
+// │  ┌──────┬──────────────────────────────────────┬──────────────────────────────────────────────────────────┐│
+// │  │ Slot │ Value                                │ Description                                              ││
+// │  ├──────┼──────────────────────────────────────┼──────────────────────────────────────────────────────────┤│
+// │  │   1  │ StakeManagerV3 address               │ Reference to StakeManager proxy/implementation           ││
+// │  │   9  │ poolAmount + 1                       │ Increment pool count (official node → pool)              ││
+// │  │  11  │ 0 (zero)                             │ Clear official amount (no more official nodes)           ││
+// │  │  18  │ Current official signer (from slot19)│ Move current official signer to "old" slot               ││
+// │  │  19  │ address(0) + (block+1) << 160        │ Clear official signer, set activation block              ││
+// │  │  20  │ superNode => [validatorId]           │ Map super node address to validator IDs array            ││
+// │  │  21  │ Validator[] array length++           │ Add new validator entry for super node                   ││
+// │  │  22  │ EnumerableSet length++               │ Add super node to minimal validator set                  ││
+// │  │  30  │ 0x0 (zero)                           │ Old super node slot (cleared)                            ││
+// │  │  31  │ superNode + (block+1) << 160         │ Super node address + activation block number             ││
+// │  └──────┴──────────────────────────────────────┴──────────────────────────────────────────────────────────┘│
+// │                                                                                                            │
+// │  CONTRACT: BKCValidatorSetV3                                                                               │
+// │  ┌──────┬──────────────────────────────────────┬──────────────────────────────────────────────────────────┐│
+// │  │ Slot │ Value                                │ Description                                              ││
+// │  ├──────┼──────────────────────────────────────┼──────────────────────────────────────────────────────────┤│
+// │  │   3  │ StakeManagerStorageV3 address        │ Reference to storage contract                            ││
+// │  └──────┴──────────────────────────────────────┴──────────────────────────────────────────────────────────┘│
+// │                                                                                                            │
+// │  CONTRACT: NftContractV3                                                                                   │
+// │  ┌──────┬──────────────────────────────────────┬──────────────────────────────────────────────────────────┐│
+// │  │ Slot │ Value                                │ Description                                              ││
+// │  ├──────┼──────────────────────────────────────┼──────────────────────────────────────────────────────────┤│
+// │  │   1  │ _holderTokens[owner]++               │ Increment super node owner's token count                 ││
+// │  │   2  │ _allTokens[] length++                │ Add super node's NFT to total supply                     ││
+// │  │   3  │ _indexes[tokenId] = length           │ Set index for new token ID                               ││
+// │  │  12  │ StakeManagerStorageV3 address        │ Reference to storage contract                            ││
+// │  └──────┴──────────────────────────────────────┴──────────────────────────────────────────────────────────┘│
+// │                                                                                                            │
+// │  CONTRACT: OfficialNodeValidatorShare                                                                      │
+// │  ┌──────┬──────────────────────────────────────┬──────────────────────────────────────────────────────────┐│
+// │  │ Slot │ Value                                │ Description                                              ││
+// │  ├──────┼──────────────────────────────────────┼──────────────────────────────────────────────────────────┤│
+// │  │  19  │ isOfficialPool = false               │ Convert official validator to regular pool               ││
+// │  └──────┴──────────────────────────────────────┴──────────────────────────────────────────────────────────┘│
+// │                                                                                                            │
+// │  CONTRACT: StakeManagerV3                                                                                  │
+// │  ┌──────┬──────────────────────────────────────┬──────────────────────────────────────────────────────────┐│
+// │  │ Slot │ Value                                │ Description                                              ││
+// │  ├──────┼──────────────────────────────────────┼──────────────────────────────────────────────────────────┤│
+// │  │   0  │ 1                                    │ Initialize reentrancy guard                              ││
+// │  │   1  │ Committee address (preserved)        │ Keep existing committee contract                         ││
+// │  │   2  │ CallHelper address (preserved)       │ Keep existing helper contract                            ││
+// │  │   3  │ TransferRouter (preserved)           │ Keep existing router contract                            ││
+// │  │   4  │ OfficialPoolStaker (preserved)       │ Keep existing staker contract                            ││
+// │  │   5  │ StakeManagerStorageV3                │ New storage contract reference                           ││
+// │  │   6  │ StakeManagerVaultV3                  │ New vault contract reference                             ││
+// │  │   7  │ NftContractV3                        │ New NFT contract reference                               ││
+// │  │   8  │ KKUB address (preserved)             │ Keep existing KKUB token                                 ││
+// │  └──────┴──────────────────────────────────────┴──────────────────────────────────────────────────────────┘│
+// │                                                                                                            │
+// │  BYTECODE UPDATES:                                                                                         │
+// │  • StakeManagerV3         → New implementation                                                             │
+// │  • StakeManagerStorageV3  → New implementation                                                             │
+// │  • SlashManagerV3         → New implementation                                                             │
+// │  • NftContractV3          → New implementation                                                             │
+// │  • BKCValidatorSetV3      → New implementation                                                             │
+// │                                                                                                            │
+// └────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
 type BaselParams struct {
 	StakeManagerV3             common.Address
 	StakeManagerStorageV3      common.Address
@@ -103,10 +171,10 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 
 	// Calculate superNodeAndValidBlock according to the formula:
 	// uint256 tmpUint256 = uint256(uint160(superNode_));
-	// tmpUint256 += blockNumber_ << 160;
-	tmpUint256 := new(big.Int).SetBytes(params.SuperNodeAddress.Bytes())       // uint256(uint160(superNode_))
-	shiftedBlockNumber := new(big.Int).Lsh(params.BaselBlock, 160)             // blockNumber_ << 160
-	superNodeAndValidBlock := new(big.Int).Add(tmpUint256, shiftedBlockNumber) // tmpUint256 += blockNumber_ << 160
+	// tmpUint256 += blockNumber_+1 << 160;
+	tmpUint256 := new(big.Int).SetBytes(params.SuperNodeAddress.Bytes())                            // uint256(uint160(superNode_))
+	shiftedBlockNumber := new(big.Int).Lsh(new(big.Int).Add(params.BaselBlock, big.NewInt(1)), 160) // blockNumber_+1 << 160
+	superNodeAndValidBlock := new(big.Int).Add(tmpUint256, shiftedBlockNumber)                      // tmpUint256 += blockNumber_+1 << 160
 
 	// Update new offical node siginer to address 0, shift current to old
 	currentOfficialNodeSigner := state.GetState(params.StakeManagerStorageV3, common.BigToHash(big.NewInt(SLOT_OFFICIAL_SIGNER_NEW))).Big()

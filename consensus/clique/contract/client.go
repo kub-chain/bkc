@@ -379,7 +379,7 @@ func (cc *ContractClient) GetCurrentValidators(headerHash common.Hash, blockNumb
 	return valz, ca, nil
 }
 
-func (cc *ContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContractsV2, error) {
+func (cc *ContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContracts, error) {
 	// block
 	blockNr := rpc.BlockNumberOrHashWithHash(headerHash, false)
 
@@ -483,7 +483,7 @@ func (cc *ContractClient) GetCurrentValidatorsWithSuperNode(headerHash common.Ha
 		return nil, nil, err
 	}
 
-	ca := &ctypes.SystemContractsV2{
+	ca := &ctypes.SystemContracts{
 		StakeManager: (*ret2)[0],
 		SlashManager: (*ret2)[1],
 		SuperNode:    superNode,

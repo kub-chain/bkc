@@ -16,11 +16,6 @@ type SystemContracts struct {
 	StakeManager common.Address `json:"stakeManager"`
 	SlashManager common.Address `json:"slashManager"`
 	OfficialNode common.Address `json:"officialNode"`
-}
-
-type SystemContractsV2 struct {
-	StakeManager common.Address `json:"stakeManager"`
-	SlashManager common.Address `json:"slashManager"`
 	SuperNode    common.Address `json:"superNode"`
 }
 
