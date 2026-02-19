@@ -619,12 +619,18 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	}
 
 	if c.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(c.config.BaselBlock.Block, common.Big1)) == 0 {
-		_, systemContracts, err := c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number))
-		if err != nil {
-			return err
+		posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+		if len(posBytes) >= contractBytesLength {
+			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+			contracts, err := ParseAddressBytes(addressBytes)
+			if err == nil && len(contracts) >= 3 {
+				snap.SystemContracts.OfficialNode = common.Address{}
+				snap.SystemContracts.SuperNode = *contracts[2]
+			}
 		}
-		snap.SystemContracts.SuperNode = systemContracts.SuperNode
 	}
+
+	// Check if signer is authorized (regular validator, official node, or super node)
 	if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
 		return errUnauthorizedSigner
 	}
@@ -633,10 +639,10 @@ func (c *Clique) verifySealPoS(snap *Snapshot, header *types.Header, parents []*
 	if !c.fakeDiff {
 		inturn := snap.inturn(header.Number.Uint64(), signer)
 		if inturn && !isInturnDifficulty(header.Difficulty) {
-			return errInvalidDifficulty
+			return errWrongDifficulty
 		}
 		if !inturn && !isNoturnDifficulty(header.Difficulty) {
-			return errInvalidDifficulty
+			return errWrongDifficulty
 		}
 	}
 	return nil
@@ -869,6 +875,8 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			header.Extra = append(header.Extra, systemContracts.StakeManager.Bytes()...)
 			header.Extra = append(header.Extra, systemContracts.SlashManager.Bytes()...)
 			header.Extra = append(header.Extra, systemContracts.SuperNode.Bytes()...)
+
+			snap.SystemContracts.SuperNode = systemContracts.SuperNode
 		}
 
 		cx := chainContext{Chain: chain, clique: c}
@@ -1022,7 +1030,6 @@ func (c *Clique) applyLausanneHardfork(header *types.Header, state *state.StateD
 	if err != nil {
 		return fmt.Errorf("failed to get solo slash rate: %v", err)
 	}
-
 	params := lausanne.LausanneParams{
 		StakeManagerV2:        stakeManager,
 		StakeManagerStorageV2: stakeManagerStorage,
@@ -1339,11 +1346,15 @@ func (c *Clique) IsInturn(chain consensus.ChainHeaderReader, header *types.Heade
 
 	if c.config.IsChaophraya(big.NewInt(int64(number))) {
 		if c.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(c.config.BaselBlock.Block, common.Big1)) == 0 {
-			_, systemContracts, err := c.contractClient.GetCurrentValidatorsWithSuperNode(header.ParentHash, new(big.Int).SetUint64(number))
-			if err != nil {
-				return false
+			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if len(posBytes) >= contractBytesLength {
+				addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+				contracts, err := ParseAddressBytes(addressBytes)
+				if err == nil && len(contracts) >= 3 {
+					snap.SystemContracts.OfficialNode = common.Address{}
+					snap.SystemContracts.SuperNode = *contracts[2]
+				}
 			}
-			snap.SystemContracts.SuperNode = systemContracts.SuperNode
 		}
 		if c.val != snap.getInturnSigner(number) && c.val != snap.SystemContracts.OfficialNode && c.val != snap.SystemContracts.SuperNode {
 			return false

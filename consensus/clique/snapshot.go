@@ -233,6 +233,27 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
+		if !s.config.IsChaophraya(header.Number) {
+			if _, ok := snap.Signers[signer]; !ok {
+				return nil, errUnauthorizedSigner
+			}
+			for _, recent := range snap.Recents {
+				if recent == signer {
+					return nil, errRecentlySigned
+				}
+			}
+		}
+		if s.config.IsChaophraya(header.Number) && (s.config.IsBasel(header.Number) && header.Number.Cmp(s.config.BaselBlock.Block) == 0) {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+				return nil, errUnauthorizedSigner
+			}
+		}
+		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
+				return nil, errUnauthorizedSigner
+			}
+		}
+
 		if isNextBlockPoS(s.config, header.Number) {
 			if number > 0 && needToUpdateValidatorList(s.config, header.Number) {
 				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
@@ -298,26 +319,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 			snap.SystemContracts.OfficialNode = common.Address{}
 			snap.SystemContracts.SuperNode = *contracts[2]
-		}
-
-		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
-			return nil, errUnauthorizedSigner
-		}
-		if !s.config.IsChaophraya(header.Number) {
-			if _, ok := snap.Signers[signer]; !ok {
-				return nil, errUnauthorizedSigner
-			}
-			for _, recent := range snap.Recents {
-				if recent == signer {
-					return nil, errRecentlySigned
-				}
-			}
-		}
-
-		if s.config.IsChaophraya(header.Number) {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
-				return nil, errUnauthorizedSigner
-			}
 		}
 
 		snap.Recents[number] = signer

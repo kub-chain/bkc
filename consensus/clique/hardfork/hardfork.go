@@ -3,6 +3,7 @@ package hardfork
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type HardForkInstruction struct {
@@ -15,7 +16,7 @@ func ApplyHardfork(db *state.StateDB, instruction HardForkInstruction) {
 	for address, storage := range instruction.Storage {
 		for key, value := range storage {
 			db.SetState(address, key, value)
-			// log.Info("Set storage", "address", address.Hex, "bg", key.Big(), "key", key.Hex(), "value", value.Hex())
+			log.Debug("Set storage", "address", address.Hex, "key", key.Hex(), "value", value.Hex())
 		}
 	}
 
