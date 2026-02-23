@@ -251,6 +251,20 @@ func (mr *MockContractClientMockRecorder) GetValidatorInfoValidatorShareContract
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetValidatorInfoValidatorShareContractByIndex", reflect.TypeOf((*MockContractClient)(nil).GetValidatorInfoValidatorShareContractByIndex), arg0, arg1, arg2, arg3)
 }
 
+// InitialSuperNode mocks base method.
+func (m *MockContractClient) InitialSuperNode(arg0 common.Address, arg1 uint64, arg2 common.Address, arg3 *state.StateDB, arg4 *types.Header, arg5 core.ChainContext, arg6 *[]*types.Transaction, arg7 *[]*types.Receipt, arg8 *[]*types.Transaction, arg9 *uint64, arg10 bool) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InitialSuperNode", arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InitialSuperNode indicates an expected call of InitialSuperNode.
+func (mr *MockContractClientMockRecorder) InitialSuperNode(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitialSuperNode", reflect.TypeOf((*MockContractClient)(nil).InitialSuperNode), arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+}
+
 // Inject mocks base method.
 func (m *MockContractClient) Inject(arg0 common.Address, arg1 ctypes.SignerTxFn) {
 	m.ctrl.T.Helper()

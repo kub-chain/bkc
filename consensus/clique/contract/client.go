@@ -260,6 +260,24 @@ func (cc *ContractClient) DistributeToValidator(contract common.Address, amount 
 	return cc.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
 
+func (cc *ContractClient) InitialSuperNode(contract common.Address, validatorId uint64, superNodeAddress common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	method := "initialSuperNode"
+	// get packed data
+	data, err := cc.stakeManagerABI.Pack(method,
+		big.NewInt(int64(validatorId)),
+		superNodeAddress,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for initialSuperNode", "error", err)
+		return err
+	}
+	// get system message
+	msg := getSystemMessage(header.Coinbase, contract, data, common.Big0)
+	// apply message
+	return cc.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+}
+
 func (cc *ContractClient) CommitSpan(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, validatorBytes []byte) error {
 	method := "commitSpan"

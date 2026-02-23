@@ -61,7 +61,7 @@ const (
 	validatorBytesLength = 40                     // Validator has 20 bytes for an address and 20 for a power
 	contractBytesLength  = 60                     // Bytes length of 3 PoS contracts (20 each)
 	totalPosContracts    = 3                      // Number of PoS contracts checked when retrieving from the validator set contract
-	wiggleTime           = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
+	wiggleTime           = 100 * time.Millisecond // Random delay (per signer) to allow concurrent signers
 )
 
 // Clique proof-of-authority protocol constants.
@@ -761,35 +761,43 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	header.Time = parent.Time + c.config.GetBlockPeriod(header.Number)
 
-	// If parent was sealed by Super Node (backup), add the 2s wait time
-	if c.config.IsBasel(parent.Number) {
-		// We check if the parent's Coinbase is the Official Node.
-		if parent.Coinbase == snap.SystemContracts.SuperNode {
-			if isNoturnDifficulty(parent.Difficulty) {
-
-				previousInturnSigner := snap.getInturnSigner(number - 1)
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-
-				currentSpan, err := c.contractClient.GetCurrentSpan(ctx, header)
-				if err == nil {
-					if !isSpanFirstBlock(c.config, header.Number) {
-						slashed, err := c.contractClient.IsSlashed(snap.SystemContracts.SlashManager, chain, previousInturnSigner, currentSpan, header)
-						if err == nil && !slashed {
-							if header.Time-parent.Time < c.config.BaselBlock.Period+2 {
-								header.Time += 2
-							}
-						}
-					}
-				}
-			}
-		}
+	if wasSlashed, err := c.isPreviousBlockSlashed(chain, snap, parent, header); err == nil && wasSlashed {
+		header.Time += 2
 	}
 
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
 	return nil
+}
+
+func (c *Clique) isPreviousBlockSlashed(chain consensus.ChainHeaderReader, snap *Snapshot, parent *types.Header, header *types.Header) (bool, error) {
+	if !c.config.IsBasel(parent.Number) {
+		return false, nil
+	}
+	if parent.Coinbase != snap.SystemContracts.SuperNode || !isNoturnDifficulty(parent.Difficulty) {
+		return false, nil
+	}
+	if isSpanFirstBlock(c.config, header.Number) {
+		return false, nil
+	}
+
+	previousInturnSigner := snap.getInturnSigner(header.Number.Uint64() - 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	currentSpan, err := c.contractClient.GetCurrentSpan(ctx, header)
+	if err != nil {
+		return false, err
+	}
+
+	slashed, err := c.contractClient.IsSlashed(snap.SystemContracts.SlashManager, chain, previousInturnSigner, currentSpan, parent)
+	if err != nil {
+		return false, err
+	}
+
+	log.Debug("Checked previous block slash status", "previousInturnSigner", previousInturnSigner, "alreadySlashed", slashed, "parent", parent.Number)
+	return !slashed, nil
 }
 
 func ParseAddressBytes(b []byte) ([]*common.Address, error) {
@@ -822,15 +830,22 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			return err
 		}
 	}
-	if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
-		err = c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
-		if err != nil {
-			return err
-		}
-	}
 	if c.config.IsChaophraya(header.Number) {
 		if c.config.ChaophrayaBlock.Cmp(header.Number) == 0 {
 			log.Info("⭐️ POS Started", "number", header.Number)
+		}
+
+		cx := chainContext{Chain: chain, clique: c}
+
+		if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
+			validatorId, superNodeAddress, err := c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
+			if err != nil {
+				return err
+			}
+			err = c.intialSuperNode(validatorId, superNodeAddress, state, header, cx, txs, receipts, systemTxs, usedGas, false, snap)
+			if err != nil {
+				return err
+			}
 		}
 
 		number := header.Number.Uint64()
@@ -878,8 +893,6 @@ func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 			snap.SystemContracts.SuperNode = systemContracts.SuperNode
 		}
-
-		cx := chainContext{Chain: chain, clique: c}
 
 		if isSpanCommitmentBlock(c.config, header.Number) {
 			err := c.commitSpan(c.val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
@@ -939,26 +952,6 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			return nil, nil, err
 		}
 	}
-	if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
-		err = c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	if c.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(c.config.BaselBlock.Block, big.NewInt(1))) == 0 {
-		posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
-		if len(posBytes) < contractBytesLength {
-			log.Error("posBytes error", "bytes", posBytes)
-		}
-		addressBytes := posBytes[len(posBytes)-contractBytesLength:]
-		contracts, err := ParseAddressBytes(addressBytes)
-		if err != nil {
-			log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
-		}
-		snap.SystemContracts.OfficialNode = common.Address{}
-		snap.SystemContracts.SuperNode = *contracts[2]
-	}
 
 	// Now proceed with system contract calls that will see the updated state
 	if c.config.IsChaophraya(header.Number) {
@@ -968,6 +961,31 @@ func (c *Clique) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 		if receipts == nil {
 			receipts = make([]*types.Receipt, 0)
+		}
+
+		if c.config.IsBasel(header.Number) && header.Number.Cmp(c.config.BaselBlock.Block) == 0 {
+			validatorId, superNodeAddress, err := c.applyBaselHardfork(header, state, snap.SystemContracts.StakeManager, snap.SystemContracts.SlashManager)
+			if err != nil {
+				return nil, nil, err
+			}
+			err = c.intialSuperNode(validatorId, superNodeAddress, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true, snap)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+		if c.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(c.config.BaselBlock.Block, big.NewInt(1))) == 0 {
+			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if len(posBytes) < contractBytesLength {
+				log.Error("posBytes error", "bytes", posBytes)
+			}
+			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+			contracts, err := ParseAddressBytes(addressBytes)
+			if err != nil {
+				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
+			}
+			snap.SystemContracts.OfficialNode = common.Address{}
+			snap.SystemContracts.SuperNode = *contracts[2]
 		}
 
 		if isSpanCommitmentBlock(c.config, header.Number) {
@@ -1051,26 +1069,26 @@ func (c *Clique) applyLausanneHardfork(header *types.Header, state *state.StateD
 	return nil
 }
 
-func (c *Clique) applyBaselHardfork(header *types.Header, state *state.StateDB, stakeManager common.Address, slashManager common.Address) error {
+func (c *Clique) applyBaselHardfork(header *types.Header, state *state.StateDB, stakeManager common.Address, slashManager common.Address) (uint64, common.Address, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stakeManagerStorage, err := c.contractClient.GetStakeManagerStorage(ctx, header)
 	if err != nil {
-		return fmt.Errorf("failed to get stake manager storage: %v", err)
+		return 0, common.Address{}, fmt.Errorf("failed to get stake manager storage: %v", err)
 	}
 	stakeManagerVault, err := c.contractClient.GetStakeManagerVault(ctx, header, stakeManager)
 	if err != nil {
-		return fmt.Errorf("failed to get stake manager vault: %v", err)
+		return 0, common.Address{}, fmt.Errorf("failed to get stake manager vault: %v", err)
 	}
 	nftContract, err := c.contractClient.GetNftContract(ctx, header, stakeManager)
 	if err != nil {
-		return fmt.Errorf("failed to get nft contract: %v", err)
+		return 0, common.Address{}, fmt.Errorf("failed to get nft contract: %v", err)
 	}
 	bkcValidatorSet := c.getValidatorContract(header)
 
 	officialNodeValidatorShare, err := c.contractClient.GetValidatorInfoValidatorShareContractByIndex(ctx, header, stakeManagerStorage, big.NewInt(0))
 	if err != nil {
-		return fmt.Errorf("failed to get official node validator share: %v", err)
+		return 0, common.Address{}, fmt.Errorf("failed to get official node validator share: %v", err)
 	}
 	params := basel.BaselParams{
 		StakeManagerV3:             stakeManager,
@@ -1085,13 +1103,13 @@ func (c *Clique) applyBaselHardfork(header *types.Header, state *state.StateDB, 
 		BaselBlock:                 c.config.BaselBlock.Block,
 	}
 
-	instruction, err := basel.New(state, params)
+	instruction, nextValidatorId, superNodeAddress, err := basel.New(state, params)
 	if err != nil {
-		return fmt.Errorf("failed to create basel instruction: %v", err)
+		return 0, common.Address{}, fmt.Errorf("failed to create basel instruction: %v", err)
 	}
 	hardfork.ApplyHardfork(state, instruction)
-	log.Info("⭐️ Basel Started", "number", header.Number, "name", instruction.Name)
-	return nil
+	log.Info("⭐️ Basel Started", "number", header.Number, "name", instruction.Name, "nextValidatorId", nextValidatorId, "superNodeAddress", superNodeAddress)
+	return nextValidatorId, superNodeAddress, nil
 }
 
 // slash spoiled validators
@@ -1155,6 +1173,11 @@ func (c *Clique) commitSpan(val common.Address, state *state.StateDB, header *ty
 	validatorBytes, _ := rlp.EncodeToBytes(validators)
 
 	return c.contractClient.CommitSpan(val, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, validatorBytes)
+}
+
+func (c *Clique) intialSuperNode(validatorId uint64, superNodeAddress common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, snap *Snapshot) error {
+	return c.contractClient.InitialSuperNode(snap.SystemContracts.StakeManager, validatorId, superNodeAddress, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

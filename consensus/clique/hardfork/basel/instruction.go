@@ -115,22 +115,22 @@ const (
 	SLOT_IS_OFFICAL_POOL = 19
 )
 
-func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction, error) {
+func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction, uint64, common.Address, error) {
 
 	if params.StakeManagerV3 == (common.Address{}) {
-		return hardfork.HardForkInstruction{}, fmt.Errorf("create Lausanne hardfork requires StakeManagerV3 address")
+		return hardfork.HardForkInstruction{}, 0, common.Address{}, fmt.Errorf("create Lausanne hardfork requires StakeManagerV3 address")
 	}
 	if params.StakeManagerStorageV3 == (common.Address{}) {
-		return hardfork.HardForkInstruction{}, fmt.Errorf("create Lausanne hardfork requires StakeManagerStorageV3 address")
+		return hardfork.HardForkInstruction{}, 0, common.Address{}, fmt.Errorf("create Lausanne hardfork requires StakeManagerStorageV3 address")
 	}
 	if params.SlashManagerV3 == (common.Address{}) {
-		return hardfork.HardForkInstruction{}, fmt.Errorf("create Lausanne hardfork requires SlashManagerV2 address")
+		return hardfork.HardForkInstruction{}, 0, common.Address{}, fmt.Errorf("create Lausanne hardfork requires SlashManagerV2 address")
 	}
 	if params.NftContractV3 == (common.Address{}) {
-		return hardfork.HardForkInstruction{}, fmt.Errorf("create Lausanne hardfork requires NftContract address")
+		return hardfork.HardForkInstruction{}, 0, common.Address{}, fmt.Errorf("create Lausanne hardfork requires NftContract address")
 	}
 	if params.BKCValidatorSetV3 == (common.Address{}) {
-		return hardfork.HardForkInstruction{}, fmt.Errorf("create Lausanne hardfork requires BKCValidatorSetV3 address")
+		return hardfork.HardForkInstruction{}, 0, common.Address{}, fmt.Errorf("create Lausanne hardfork requires BKCValidatorSetV3 address")
 	}
 
 	instruction := hardfork.HardForkInstruction{
@@ -301,7 +301,7 @@ func New(state *state.StateDB, params BaselParams) (hardfork.HardForkInstruction
 		common.BigToHash(big.NewInt(7)): common.BytesToHash(params.NftContractV3.Bytes()),
 	}
 
-	return instruction, nil
+	return instruction, nextValidatorId, params.SuperNodeAddress, nil
 }
 
 func getMappingSlot(key common.Hash, baseSlot uint64) common.Hash {

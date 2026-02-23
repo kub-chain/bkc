@@ -35,6 +35,13 @@ const stakeManageABI = `[
     "inputs": [],
     "outputs": [{ "name": "", "type": "address", "internalType": "contract IKKUB" }],
     "stateMutability": "view"
+  },
+  {
+    "type":"function",
+    "name": "initialSuperNode",
+    "inputs": [{"name":"validatorId_","type":"uint256","internalType":"uint256"},{"name":"signer_","type":"address","internalType":"address"}],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   }
 ]`
 const validatorSetABI = `[
