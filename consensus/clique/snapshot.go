@@ -233,9 +233,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			return nil, err
 		}
 
-		if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
-			return nil, errUnauthorizedSigner
-		}
 		if !s.config.IsChaophraya(header.Number) {
 			if _, ok := snap.Signers[signer]; !ok {
 				return nil, errUnauthorizedSigner
@@ -246,9 +243,81 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				}
 			}
 		}
+		if isNextBlockPoS(s.config, header.Number) {
+			if number > 0 && needToUpdateValidatorList(s.config, header.Number) {
+				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+				if len(posBytes) < contractBytesLength {
+					log.Error("posBytes error", "bytes", posBytes)
+					// panic("invalid consensus bytes")
+				}
+				validatorBytes := posBytes[:len(posBytes)-contractBytesLength]
+				addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+				contracts, err := ParseAddressBytes(addressBytes)
+				if err != nil {
+					log.Error("posBytes error", "posBytes", posBytes, "validatorBytes", validatorBytes, "addressBytes", addressBytes)
+					// panic(err)
+				}
+				if len(contracts) < totalPosContracts {
+					log.Error("some PoS contracts are missing", "require", totalPosContracts, "have", len(contracts), "contracts", contracts)
+				}
+				// get validators from headers and use that for new validator set
+				newValArr, err := utils.ParseValidatorsAndPower(validatorBytes)
 
-		if s.config.IsChaophraya(header.Number) {
+				if err != nil {
+					return nil, err
+				}
+				newVals := make(map[common.Address]struct{}, len(newValArr))
+				validators := make([]common.Address, 0)
+				for _, val := range newValArr {
+					newVals[val.Address] = struct{}{}
+					validators = append(validators, val.Address)
+				}
+
+				oldLimit := len(snap.Signers)/2 + 1
+				newLimit := len(newVals)/2 + 1
+				if newLimit < oldLimit {
+					for i := 0; i < oldLimit-newLimit; i++ {
+						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
+					}
+				}
+
+				snap.Signers = newVals
+				snap.Validators = validators
+				snap.SystemContracts.StakeManager = *contracts[0]
+				snap.SystemContracts.SlashManager = *contracts[1]
+				snap.SystemContracts.OfficialNode = *contracts[2]
+
+				if s.config.IsBasel(header.Number) {
+					snap.SystemContracts.OfficialNode = common.Address{}
+					snap.SystemContracts.SuperNode = *contracts[2]
+				}
+			}
+		}
+
+		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
+			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if len(posBytes) < contractBytesLength {
+				log.Error("posBytes error", "bytes", posBytes)
+				// panic("invalid consensus bytes")
+			}
+			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+			contracts, err := ParseAddressBytes(addressBytes)
+			if err != nil {
+				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
+				// panic(err)
+			}
+			snap.SystemContracts.OfficialNode = common.Address{}
+			snap.SystemContracts.SuperNode = *contracts[2]
+		}
+
+		if s.config.IsChaophraya(header.Number) && (s.config.IsBasel(header.Number) && header.Number.Cmp(s.config.BaselBlock.Block) == 0) {
 			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+				return nil, errUnauthorizedSigner
+			}
+		}
+
+		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) >= 0 {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
 				return nil, errUnauthorizedSigner
 			}
 		}
@@ -322,53 +391,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				delete(snap.Tally, voteAddr)
 			}
 		}
-
-		if isNextBlockPoS(s.config, header.Number) {
-			if number > 0 && needToUpdateValidatorList(s.config, header.Number) {
-				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
-				if len(posBytes) < contractBytesLength {
-					log.Error("posBytes error", "bytes", posBytes)
-					// panic("invalid consensus bytes")
-				}
-				validatorBytes := posBytes[:len(posBytes)-contractBytesLength]
-				addressBytes := posBytes[len(posBytes)-contractBytesLength:]
-				contracts, err := ParseAddressBytes(addressBytes)
-				if err != nil {
-					log.Error("posBytes error", "posBytes", posBytes, "validatorBytes", validatorBytes, "addressBytes", addressBytes)
-					// panic(err)
-				}
-				if len(contracts) < totalPosContracts {
-					log.Error("some PoS contracts are missing", "require", totalPosContracts, "have", len(contracts), "contracts", contracts)
-				}
-				// get validators from headers and use that for new validator set
-				newValArr, err := utils.ParseValidatorsAndPower(validatorBytes)
-
-				if err != nil {
-					return nil, err
-				}
-				newVals := make(map[common.Address]struct{}, len(newValArr))
-				validators := make([]common.Address, 0)
-				for _, val := range newValArr {
-					newVals[val.Address] = struct{}{}
-					validators = append(validators, val.Address)
-				}
-
-				oldLimit := len(snap.Signers)/2 + 1
-				newLimit := len(newVals)/2 + 1
-				if newLimit < oldLimit {
-					for i := 0; i < oldLimit-newLimit; i++ {
-						delete(snap.Recents, number-uint64(newLimit)-uint64(i))
-					}
-				}
-
-				snap.Signers = newVals
-				snap.Validators = validators
-				snap.SystemContracts.StakeManager = *contracts[0]
-				snap.SystemContracts.SlashManager = *contracts[1]
-				snap.SystemContracts.OfficialNode = *contracts[2]
-			}
-		}
-		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Debug("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()

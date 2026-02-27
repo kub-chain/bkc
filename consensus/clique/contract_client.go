@@ -20,6 +20,9 @@ type ContractClient interface {
 	// Set default signer for contract client
 	SetSigner(signer types.Signer)
 
+	// Set BKC validator set contract address
+	SetBKCValidatorAddress(address common.Address)
+
 	// Inject config and things in to a client
 	Inject(val common.Address, signTxFn ctypes.SignerTxFn)
 
@@ -45,6 +48,12 @@ type ContractClient interface {
 	// Call for  current commited validators
 	GetCurrentValidators(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContracts, error)
 
+	// Call for system contract addresses
+	// GetSystemContracts(headerHash common.Hash, blockNumber *big.Int) (*ctypes.SystemContracts, error)
+
+	// Call for  current commited validators with super node
+	GetCurrentValidatorsWithSuperNode(headerHash common.Hash, blockNumber *big.Int) ([]*ctypes.Validator, *ctypes.SystemContracts, error)
+
 	// Call for eligible validators
 	GetEligibleValidators(headerHash common.Hash, blockNumber uint64) ([]*ctypes.Validator, error)
 
@@ -68,4 +77,11 @@ type ContractClient interface {
 
 	// Call for solo slash rate
 	GetSoloSlashRate(ctx context.Context, header *types.Header, stakeManagerStorage common.Address) (*big.Int, error)
+
+	// Call for validator info from stake manager contract
+	GetValidatorInfoValidatorShareContractByIndex(ctx context.Context, header *types.Header, stakeManagerStorage common.Address, index *big.Int) (common.Address, error)
+
+	// Call for initial super node
+	InitialSuperNode(stakeManager common.Address, validatorId uint64, superNodeAddress common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
+		txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error
 }

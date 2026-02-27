@@ -981,3 +981,169 @@ func TestRandomValidator(t *testing.T) {
 	}
 
 }
+
+// TestGetBlockPeriodBaselHardfork tests that GetBlockPeriod returns the correct period
+// before and after the Basel hardfork activation
+func TestGetBlockPeriodBaselHardfork(t *testing.T) {
+	var (
+		baselActivationBlock = 10
+	)
+
+	// Create a test configuration
+	genspec := test.NewDefaultGenesis()
+
+	// Set default Clique period to 5 seconds (before Basel)
+	genspec.Config.Clique.Period = 5
+
+	// Configure Basel hardfork activation
+	genspec.Config.BaselBlock = &params.BaselConfig{
+		Block:  big.NewInt(int64(baselActivationBlock)),
+		Period: 3, // New block period in seconds (3 seconds instead of 5)
+	}
+
+	// Test 1: Pre-Basel blocks should return period of 5 seconds
+	preBaselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(1))
+	if preBaselPeriod != 5 {
+		t.Fatalf("Pre-Basel GetBlockPeriod should return 5, got %d", preBaselPeriod)
+	}
+
+	// Test 2: Basel activation block should return period of 3 seconds
+	baselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(int64(baselActivationBlock)))
+	if baselPeriod != 3 {
+		t.Fatalf("Basel GetBlockPeriod (block %d) should return 3, got %d", baselActivationBlock, baselPeriod)
+	}
+
+	// Test 3: Post-Basel blocks should return period of 3 seconds
+	postBaselPeriod := genspec.Config.GetBlockPeriod(big.NewInt(int64(baselActivationBlock + 1)))
+	if postBaselPeriod != 3 {
+		t.Fatalf("Post-Basel GetBlockPeriod (block %d) should return 3, got %d", baselActivationBlock+1, postBaselPeriod)
+	}
+
+}
+
+func TestChangeSlashThresholdAndEpochSize(t *testing.T) {
+	var (
+		accountRegistry = test.NewAccountRegistry()
+		lausanneBlock   = uint64(60)
+		threshold       = int64(72)
+		epochSize       = int64(576)
+	)
+
+	accountRegistry.Add("coinbase")
+	coinbase := accountRegistry.Get("coinbase")
+
+	mockCtl := gomock.NewController(t)
+	defer mockCtl.Finish()
+
+	mockContractClient := mock.NewMockContractClient(mockCtl)
+	mockEthAPI := mock.NewMockEthAPI(mockCtl)
+
+	mockContractClient.EXPECT().SetSigner(gomock.Any()).AnyTimes()
+
+	db := rawdb.NewMemoryDatabase()
+	genspec := test.NewDefaultGenesis()
+
+	// Configure Lausanne Hardfork
+	genspec.Config.LausanneBlock = new(big.Int).SetUint64(lausanneBlock)
+
+	// Initialize storage with pre-hardfork values
+	genspec.Alloc = make(core.GenesisAlloc)
+	storageAddr := common.HexToAddress("0x10")
+	genspec.Alloc[storageAddr] = core.GenesisAccount{
+		Balance: big.NewInt(0),
+		Storage: map[common.Hash]common.Hash{
+			common.BigToHash(big.NewInt(28)): common.BigToHash(big.NewInt(50)),
+			common.BigToHash(big.NewInt(29)): common.BigToHash(big.NewInt(345)),
+		},
+	}
+
+	genspec.ExtraData = make([]byte, extraVanity+common.AddressLength+extraSeal)
+	copy(genspec.ExtraData[extraVanity:], coinbase.Address[:])
+	genspec.MustCommit(db)
+
+	signFn := func(account accounts.Account, s string, data []byte) ([]byte, error) {
+		return crypto.Sign(crypto.Keccak256(data), coinbase.Key)
+	}
+
+	c := New(genspec.Config, db, mockEthAPI, mockContractClient)
+
+	// Mock Inject
+	mockContractClient.EXPECT().Inject(gomock.Any(), gomock.Any()).Times(1)
+	c.Authorize(coinbase.Address, signFn, nil)
+
+	testChain, err := test.NewTestChain(genspec.Config, c, db, signFn, coinbase)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Prepare mocks
+
+	sysContract := &ctypes.SystemContracts{
+		StakeManager: common.HexToAddress("0x1"),
+		SlashManager: common.HexToAddress("0x2"),
+		OfficialNode: coinbase.Address,
+	}
+
+	mockContractClient.EXPECT().GetCurrentValidators(gomock.Any(), gomock.Any()).Return([]*ctypes.Validator{
+		{Address: coinbase.Address, VotingPower: 10},
+	}, sysContract, nil).AnyTimes()
+
+	mockContractClient.EXPECT().GetEligibleValidators(gomock.Any(), gomock.Any()).Return([]*ctypes.Validator{
+		{Address: coinbase.Address, VotingPower: 10},
+	}, nil).AnyTimes()
+
+	mockContractClient.EXPECT().CommitSpan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	mockContractClient.EXPECT().GetCurrentSpan(gomock.Any(), gomock.Any()).Return(big.NewInt(0), nil).AnyTimes()
+
+	mockContractClient.EXPECT().GetStakeManagerStorage(gomock.Any(), gomock.Any()).Return(common.HexToAddress("0x10"), nil).Times(2)
+	mockContractClient.EXPECT().GetStakeManagerVault(gomock.Any(), gomock.Any(), gomock.Any()).Return(common.HexToAddress("0x11"), nil).Times(2)
+	mockContractClient.EXPECT().GetNftContract(gomock.Any(), gomock.Any(), gomock.Any()).Return(common.HexToAddress("0x12"), nil).Times(2)
+	mockContractClient.EXPECT().GetKKUB(gomock.Any(), gomock.Any(), gomock.Any()).Return(common.HexToAddress("0x13"), nil).Times(2)
+
+	// Set new SlashThreshold and SlashEpochSize values
+	mockContractClient.EXPECT().GetSlashThreshold(gomock.Any(), gomock.Any(), gomock.Any()).Return(big.NewInt(threshold), nil).Times(2)
+	mockContractClient.EXPECT().GetSlashEpochSize(gomock.Any(), gomock.Any(), gomock.Any()).Return(big.NewInt(epochSize), nil).Times(2)
+
+	mockContractClient.EXPECT().GetSoloSlashRate(gomock.Any(), gomock.Any(), gomock.Any()).Return(big.NewInt(100), nil).Times(2)
+
+	//BEFORE Lausanne block
+	err = testChain.Roll(t, int(lausanneBlock-1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state, _ := testChain.Chain.StateAt(testChain.Chain.CurrentBlock().Root())
+	// Slot 28: SlashThreshold
+	val := state.GetState(common.HexToAddress("0x10"), common.BigToHash(big.NewInt(28)))
+	if val.Big().Cmp(big.NewInt(50)) != 0 {
+		t.Errorf("Expected SlashThreshold 50 before hardfork, got %v", val.Big())
+	}
+
+	// Slot 29: SlashEpochSize
+	val = state.GetState(common.HexToAddress("0x10"), common.BigToHash(big.NewInt(29)))
+	if val.Big().Cmp(big.NewInt(345)) != 0 {
+		t.Errorf("Expected SlashEpochSize 345 before hardfork, got %v", val.Big())
+	}
+
+	//Lausanne block (Hardfork activation)
+	err = testChain.Roll(t, int(lausanneBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state, _ = testChain.Chain.StateAt(testChain.Chain.CurrentBlock().Root())
+
+	val = state.GetState(common.HexToAddress("0x10"), common.BigToHash(big.NewInt(28)))
+	expectedThreshold := common.BigToHash(big.NewInt(threshold))
+	if val != expectedThreshold {
+		t.Errorf("Expected SlashThreshold %x, got %x", expectedThreshold, val)
+	}
+
+	val = state.GetState(common.HexToAddress("0x10"), common.BigToHash(big.NewInt(29)))
+	expectedEpochSize := common.BigToHash(big.NewInt(epochSize))
+	if val != expectedEpochSize {
+		t.Errorf("Expected SlashEpochSize %x, got %x", expectedEpochSize, val)
+	}
+
+}

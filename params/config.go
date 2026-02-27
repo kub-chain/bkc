@@ -262,16 +262,16 @@ var (
 	//
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
-	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, new(EthashConfig), nil}
+	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	//
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
-	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}}
+	AllCliqueProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, &CliqueConfig{Period: 0, Epoch: 30000}}
 
-	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil}
+	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil}
 	TestRules       = TestChainConfig.Rules(new(big.Int), false)
 )
 
@@ -323,6 +323,14 @@ type CheckpointOracleConfig struct {
 	Threshold uint64           `json:"threshold"`
 }
 
+// BaselConfig represents the configuration for the Basel hardfork
+type BaselConfig struct {
+	Block          *big.Int       `json:"block,omitempty"`          // Block number where the fork activates
+	Period         uint64         `json:"period,omitempty"`         // New block period after the fork
+	SuperNode      common.Address `json:"superNode,omitempty"`      // SuperNode address
+	SuperNodeOwner common.Address `json:"superNodeOwner,omitempty"` // SuperNode owner address
+}
+
 // ChainConfig is the core config which determines the blockchain settings.
 //
 // ChainConfig is stored in the database on a per block basis. This means
@@ -343,19 +351,20 @@ type ChainConfig struct {
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
 
-	ByzantiumBlock         *big.Int `json:"byzantiumBlock,omitempty"`         // Byzantium switch block (nil = no fork, 0 = already on byzantium)
-	ConstantinopleBlock    *big.Int `json:"constantinopleBlock,omitempty"`    // Constantinople switch block (nil = no fork, 0 = already activated)
-	PetersburgBlock        *big.Int `json:"petersburgBlock,omitempty"`        // Petersburg switch block (nil = same as Constantinople)
-	IstanbulBlock          *big.Int `json:"istanbulBlock,omitempty"`          // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	ErawanBlock            *big.Int `json:"erawanBlock,omitempty"`            // IsErawan switch block (nil = no fork, 0 = already on Erawan)
-	ChaophrayaBlock        *big.Int `json:"chaophrayaBlock,omitempty"`        // IsChaophraya switch block (nil = no fork, 0 = already on Chaophraya)
-	ChaophrayaBangkokBlock *big.Int `json:"chaophrayaBangkokBlock,omitempty"` // IsChaophraya Testnet switch block (nil = no fork, 0 = already on Chaophraya Testnet)
-	LausanneBlock          *big.Int `json:"lausanneBlock,omitempty"`          // IsLausanne switch block (nil = no fork, 0 = already on lausanne)
-	MuirGlacierBlock       *big.Int `json:"muirGlacierBlock,omitempty"`       // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	BerlinBlock            *big.Int `json:"berlinBlock,omitempty"`            // Berlin switch block (nil = no fork, 0 = already on berlin)
-	LondonBlock            *big.Int `json:"londonBlock,omitempty"`            // London switch block (nil = no fork, 0 = already on london)
-	ArrowGlacierBlock      *big.Int `json:"arrowGlacierBlock,omitempty"`      // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	MergeForkBlock         *big.Int `json:"mergeForkBlock,omitempty"`         // EIP-3675 (TheMerge) switch block (nil = no fork, 0 = already in merge proceedings)
+	ByzantiumBlock         *big.Int     `json:"byzantiumBlock,omitempty"`         // Byzantium switch block (nil = no fork, 0 = already on byzantium)
+	ConstantinopleBlock    *big.Int     `json:"constantinopleBlock,omitempty"`    // Constantinople switch block (nil = no fork, 0 = already activated)
+	PetersburgBlock        *big.Int     `json:"petersburgBlock,omitempty"`        // Petersburg switch block (nil = same as Constantinople)
+	IstanbulBlock          *big.Int     `json:"istanbulBlock,omitempty"`          // Istanbul switch block (nil = no fork, 0 = already on istanbul)
+	ErawanBlock            *big.Int     `json:"erawanBlock,omitempty"`            // IsErawan switch block (nil = no fork, 0 = already on Erawan)
+	ChaophrayaBlock        *big.Int     `json:"chaophrayaBlock,omitempty"`        // IsChaophraya switch block (nil = no fork, 0 = already on Chaophraya)
+	ChaophrayaBangkokBlock *big.Int     `json:"chaophrayaBangkokBlock,omitempty"` // IsChaophraya Testnet switch block (nil = no fork, 0 = already on Chaophraya Testnet)
+	LausanneBlock          *big.Int     `json:"lausanneBlock,omitempty"`          // IsLausanne switch block (nil = no fork, 0 = already on lausanne)
+	BaselBlock             *BaselConfig `json:"baselBlock,omitempty"`             // IsBasel config - changes block period (nil = no fork)
+	MuirGlacierBlock       *big.Int     `json:"muirGlacierBlock,omitempty"`       // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	BerlinBlock            *big.Int     `json:"berlinBlock,omitempty"`            // Berlin switch block (nil = no fork, 0 = already on berlin)
+	LondonBlock            *big.Int     `json:"londonBlock,omitempty"`            // London switch block (nil = no fork, 0 = already on london)
+	ArrowGlacierBlock      *big.Int     `json:"arrowGlacierBlock,omitempty"`      // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	MergeForkBlock         *big.Int     `json:"mergeForkBlock,omitempty"`         // EIP-3675 (TheMerge) switch block (nil = no fork, 0 = already in merge proceedings)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -399,7 +408,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Erawan: %v, Chaophraya: %v, Lausanne: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, MergeFork: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Erawan: %v, Chaophraya: %v, Lausanne: %v, Basel: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, MergeFork: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -414,6 +423,7 @@ func (c *ChainConfig) String() string {
 		c.ErawanBlock,
 		c.ChaophrayaBlock,
 		c.LausanneBlock,
+		c.BaselBlock,
 		c.MuirGlacierBlock,
 		c.BerlinBlock,
 		c.LondonBlock,
@@ -502,6 +512,28 @@ func (c *ChainConfig) IsChaophrayaBangkok(num *big.Int) bool {
 
 func (c *ChainConfig) IsLausanne(num *big.Int) bool {
 	return isForked(c.LausanneBlock, num)
+}
+
+// IsBasel returns whether num is either equal to or greater than the Basel fork block
+func (c *ChainConfig) IsBasel(num *big.Int) bool {
+	if c.BaselBlock != nil && c.BaselBlock.Block != nil {
+		return isForked(c.BaselBlock.Block, num)
+	}
+	return false
+}
+
+// GetBlockPeriod returns the correct block period based on the block number
+// Returns BaselBlock.Period if fork is active and configured, otherwise returns Period
+func (c *ChainConfig) GetBlockPeriod(num *big.Int) uint64 {
+	if c.Clique != nil && c.IsBasel(num) {
+		if c.BaselBlock != nil && c.BaselBlock.Period > 0 {
+			return c.BaselBlock.Period
+		}
+	}
+	if c.Clique != nil {
+		return c.Clique.Period
+	}
+	return 0
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -715,7 +747,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsErawan, IsChaophraya, IsLausanne                      bool
+	IsErawan, IsChaophraya, IsLausanne, IsBasel             bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge                                                 bool
 }
@@ -739,6 +771,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool) Rules {
 		IsErawan:         c.IsErawan(num),
 		IsChaophraya:     c.IsChaophraya(num),
 		IsLausanne:       c.IsLausanne(num),
+		IsBasel:          c.IsBasel(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
