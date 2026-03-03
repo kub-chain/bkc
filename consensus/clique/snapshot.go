@@ -243,6 +243,33 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 				}
 			}
 		}
+
+		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
+			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			if len(posBytes) < contractBytesLength {
+				log.Error("posBytes error", "bytes", posBytes)
+			}
+			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
+			contracts, err := ParseAddressBytes(addressBytes)
+			if err != nil {
+				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
+			}
+			snap.SystemContracts.OfficialNode = common.Address{}
+			snap.SystemContracts.SuperNode = *contracts[2]
+		}
+
+		if s.config.IsChaophraya(header.Number) && (s.config.IsBasel(header.Number) && header.Number.Cmp(s.config.BaselBlock.Block) == 0) {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
+				return nil, errUnauthorizedSigner
+			}
+		}
+
+		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) >= 0 {
+			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
+				return nil, errUnauthorizedSigner
+			}
+		}
+
 		if isNextBlockPoS(s.config, header.Number) {
 			if number > 0 && needToUpdateValidatorList(s.config, header.Number) {
 				posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
@@ -291,34 +318,6 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 					snap.SystemContracts.OfficialNode = common.Address{}
 					snap.SystemContracts.SuperNode = *contracts[2]
 				}
-			}
-		}
-
-		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) == 0 {
-			posBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
-			if len(posBytes) < contractBytesLength {
-				log.Error("posBytes error", "bytes", posBytes)
-				// panic("invalid consensus bytes")
-			}
-			addressBytes := posBytes[len(posBytes)-contractBytesLength:]
-			contracts, err := ParseAddressBytes(addressBytes)
-			if err != nil {
-				log.Error("posBytes error", "posBytes", posBytes, "addressBytes", addressBytes)
-				// panic(err)
-			}
-			snap.SystemContracts.OfficialNode = common.Address{}
-			snap.SystemContracts.SuperNode = *contracts[2]
-		}
-
-		if s.config.IsChaophraya(header.Number) && (s.config.IsBasel(header.Number) && header.Number.Cmp(s.config.BaselBlock.Block) == 0) {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode {
-				return nil, errUnauthorizedSigner
-			}
-		}
-
-		if s.config.IsBasel(header.Number) && header.Number.Cmp(new(big.Int).Add(s.config.BaselBlock.Block, big.NewInt(1))) >= 0 {
-			if _, ok := snap.Signers[signer]; !ok && signer != snap.SystemContracts.OfficialNode && signer != snap.SystemContracts.SuperNode {
-				return nil, errUnauthorizedSigner
 			}
 		}
 
