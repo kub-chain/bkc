@@ -358,7 +358,7 @@ func TestTransactionQueue2(t *testing.T) {
 	pool.enqueueTx(tx2.Hash(), tx2, false, true)
 	pool.enqueueTx(tx3.Hash(), tx3, false, true)
 
-	pool.promoteExecutables([]common.Address{from})
+	pool.promoteExecutables([]common.Address{from}, nil)
 	if len(pool.pending) != 1 {
 		t.Error("expected pending length to be 1, got", len(pool.pending))
 	}
@@ -2467,7 +2467,7 @@ func benchmarkFuturePromotion(b *testing.B, size int) {
 	// Benchmark the speed of pool validation
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.promoteExecutables(nil)
+		pool.promoteExecutables(nil, nil)
 	}
 }
 

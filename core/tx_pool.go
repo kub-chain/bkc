@@ -581,9 +581,10 @@ func (pool *TxPool) local() map[common.Address]types.Transactions {
 	return txs
 }
 
-// validateTx checks whether a transaction is valid according to the consensus
-// rules and adheres to some heuristic limits of the local node (price and size).
-func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
+// validateTxStateless checks transaction validity for rules that do not require
+// reading from the current blockchain state (nonce / balance). These checks are
+// safe to run concurrently and without holding pool.mu.
+func (pool *TxPool) validateTxStateless(tx *types.Transaction, local bool) error {
 	// Accept only legacy transactions until EIP-2718/2930 activates.
 	if !pool.eip2718 && tx.Type() != types.LegacyTxType {
 		return ErrTxTypeNotSupported
@@ -617,14 +618,26 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		return ErrTipAboveFeeCap
 	}
 	// Make sure the transaction is signed properly.
-	from, err := types.Sender(pool.signer, tx)
-	if err != nil {
+	if _, err := types.Sender(pool.signer, tx); err != nil {
 		return ErrInvalidSender
 	}
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !local && tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
 		return ErrUnderpriced
 	}
+	return nil
+}
+
+// validateTx checks whether a transaction is valid according to the consensus
+// rules and adheres to some heuristic limits of the local node (price and size).
+// It assumes validateTxStateless has already passed.
+func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
+	// Run all checks that do not touch the current chain state first.
+	if err := pool.validateTxStateless(tx, local); err != nil {
+		return err
+	}
+	// Stateful checks — require pool.mu to be held.
+	from, _ := types.Sender(pool.signer, tx) // already verified above
 	// Ensure the transaction adheres to nonce ordering
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
 		return ErrNonceTooLow
@@ -899,15 +912,6 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 			knownTxMeter.Mark(1)
 			continue
 		}
-		// Exclude transactions with invalid signatures as soon as
-		// possible and cache senders in transactions before
-		// obtaining lock
-		_, err := types.Sender(pool.signer, tx)
-		if err != nil {
-			errs[i] = ErrInvalidSender
-			invalidTxMeter.Mark(1)
-			continue
-		}
 		// Accumulate all unknown transactions for deeper processing
 		news = append(news, tx)
 	}
@@ -915,9 +919,44 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		return errs
 	}
 
+	// Run stateless validation concurrently across all candidate transactions.
+	// These checks do not touch pool.currentState and are safe to parallelise.
+	// Note: the parameter named 'sync' shadows the sync package here, so we
+	// use a done channel instead of sync.WaitGroup.
+	statelessErrs := make([]error, len(news))
+	statelessDone := make(chan struct{}, len(news))
+	for i, tx := range news {
+		go func(idx int, t *types.Transaction) {
+			statelessErrs[idx] = pool.validateTxStateless(t, local)
+			statelessDone <- struct{}{}
+		}(i, tx)
+	}
+	for range news {
+		<-statelessDone
+	}
+
+	// Collect transactions that passed stateless checks and map errors back.
+	passed := make([]*types.Transaction, 0, len(news))
+	var nilSlotStateless int
+	for i, tx := range news {
+		for errs[nilSlotStateless] != nil {
+			nilSlotStateless++
+		}
+		if statelessErrs[i] != nil {
+			errs[nilSlotStateless] = statelessErrs[i]
+			invalidTxMeter.Mark(1)
+		} else {
+			passed = append(passed, tx)
+		}
+		nilSlotStateless++
+	}
+	if len(passed) == 0 {
+		return errs
+	}
+
 	// Process all the new transaction and merge any errors into the original slice
 	pool.mu.Lock()
-	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
+	newErrs, dirtyAddrs := pool.addTxsLocked(passed, local)
 	pool.mu.Unlock()
 
 	var nilSlot = 0
@@ -1138,6 +1177,13 @@ func (pool *TxPool) scheduleReorgLoop() {
 	}
 }
 
+// accountState holds a pre-read snapshot of an account's nonce and balance,
+// used to avoid statedb lookups while pool.mu is held during promotion.
+type accountState struct {
+	nonce   uint64
+	balance *big.Int
+}
+
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap) {
 	defer func(t0 time.Time) {
@@ -1152,6 +1198,24 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		// the flatten operation can be avoided.
 		promoteAddrs = dirtyAccounts.flatten()
 	}
+
+	// For non-reset promotions, pre-read nonce and balance for each queued
+	// address outside pool.mu so that disk/trie I/O does not block the write
+	// lock. We take a read lock only long enough to snapshot the address set.
+	var prefetched map[common.Address]accountState
+	if reset == nil && len(promoteAddrs) > 0 {
+		prefetched = make(map[common.Address]accountState, len(promoteAddrs))
+		pool.mu.RLock()
+		state := pool.currentState
+		pool.mu.RUnlock()
+		for _, addr := range promoteAddrs {
+			prefetched[addr] = accountState{
+				nonce:   state.GetNonce(addr),
+				balance: state.GetBalance(addr),
+			}
+		}
+	}
+
 	pool.mu.Lock()
 	if reset != nil {
 		// Reset from the old head to the new, rescheduling any reorged transactions
@@ -1171,7 +1235,7 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		}
 	}
 	// Check for pending transactions for every account that sent new ones
-	promoted := pool.promoteExecutables(promoteAddrs)
+	promoted := pool.promoteExecutables(promoteAddrs, prefetched)
 
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
@@ -1309,9 +1373,34 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 // promoteExecutables moves transactions that have become processable from the
 // future queue to the set of pending transactions. During this process, all
 // invalidated transactions (low nonce, low balance) are deleted.
-func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Transaction {
+//
+// prefetched optionally supplies pre-read nonce/balance values for addresses,
+// avoiding statedb lookups while the write lock is held. Nil entries or a nil
+// map fall back to reading directly from pool.currentState.
+func (pool *TxPool) promoteExecutables(accounts []common.Address, prefetched map[common.Address]accountState) []*types.Transaction {
 	// Track the promoted transactions to broadcast them at once
 	var promoted []*types.Transaction
+
+	// getNonce returns the canonical nonce for addr, using the prefetch cache
+	// when available to avoid a statedb read under the write lock.
+	getNonce := func(addr common.Address) uint64 {
+		if prefetched != nil {
+			if s, ok := prefetched[addr]; ok {
+				return s.nonce
+			}
+		}
+		return pool.currentState.GetNonce(addr)
+	}
+	// getBalance returns the canonical balance for addr, using the prefetch
+	// cache when available.
+	getBalance := func(addr common.Address) *big.Int {
+		if prefetched != nil {
+			if s, ok := prefetched[addr]; ok {
+				return s.balance
+			}
+		}
+		return pool.currentState.GetBalance(addr)
+	}
 
 	// Iterate over all accounts and promote any executable transactions
 	for _, addr := range accounts {
@@ -1320,14 +1409,14 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			continue // Just in case someone calls with a non existing account
 		}
 		// Drop all transactions that are deemed too old (low nonce)
-		forwards := list.Forward(pool.currentState.GetNonce(addr))
+		forwards := list.Forward(getNonce(addr))
 		for _, tx := range forwards {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
 		}
 		log.Trace("Removed old queued transactions", "count", len(forwards))
 		// Drop all transactions that are too costly (low balance or out of gas)
-		drops, _ := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
+		drops, _ := list.Filter(getBalance(addr), pool.currentMaxGas)
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
